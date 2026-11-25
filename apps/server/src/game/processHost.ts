@@ -733,33 +733,3 @@ export const stopRecorded = async (
     await sleep(100);
   }
 };
-
-/**
- * Runs a short tool child (ffmpeg on finished files) to its end, killed past
- * `timeoutMs`; resolves with its exit code, null when it never ran or was killed.
- */
-export const runOwned = (
-  host: ProcessHostState,
-  command: string,
-  args: ReadonlyArray<string>,
-  options: { readonly env: NodeJS.ProcessEnv; readonly timeoutMs: number },
-): Promise<number | null> =>
-  new Promise((resolve) => {
-    const owned = spawnOwned(host, command, args, {
-      env: options.env,
-      stdio: "ignore",
-      tree: false,
-    });
-    const timer = setTimeout(() => {
-      owned.signal("SIGKILL");
-      resolve(null);
-    }, options.timeoutMs);
-    owned.child.once("exit", (code) => {
-      clearTimeout(timer);
-      resolve(code);
-    });
-    owned.child.once("error", () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
-  });

@@ -680,7 +680,7 @@ const make = Effect.gen(function* () {
           path,
           source: path === override?.trim() ? "env" : "path",
           status: "ready",
-          message: "Records each bot play, which a build's play facts are read from.",
+          message: "Draws the asset library's contact sheets and measures its sounds' loudness.",
           downloadUrl: null,
         }
       : {
@@ -688,8 +688,8 @@ const make = Effect.gen(function* () {
           installed: false,
           path: null,
           source: null,
-          status: "error",
-          message: `ffmpeg was not found (Kurambit looks at KURAMBIT_FFMPEG, then PATH). Without it a build is only checked for booting: its plays are not measured, and Keep going cannot set up a play bot. Install it with your package manager (apt install ffmpeg, dnf install ffmpeg, brew install ffmpeg, winget install ffmpeg), or get it from ${FFMPEG_DOWNLOAD}, then press Check again.`,
+          status: "warning",
+          message: `ffmpeg was not found (Kurambit looks at KURAMBIT_FFMPEG, then PATH). Without it the asset library lists a pack's files with no pictures. Install it with your package manager (apt install ffmpeg, dnf install ffmpeg, brew install ffmpeg, winget install ffmpeg), or get it from ${FFMPEG_DOWNLOAD}, then press Check again.`,
           downloadUrl: FFMPEG_DOWNLOAD,
         };
   });

@@ -391,12 +391,9 @@ async function frames(video: string, shares: ReadonlyArray<number>, name: string
   return shots;
 }
 
-/**
- * Three pictures of play from the facts' own plays: the random-input run first
- * (it moves), then the play bot's. Early, middle and late.
- */
+/** Three pictures of play from the random-input run: early, middle and late. */
 async function screenshots(root: string, facts: GameBuildFacts, id: string) {
-  for (const tier of [facts.masher, facts.skilled]) {
+  for (const tier of [facts.masher]) {
     const video = videoOf(root, tier);
     if (video === null || tier.status !== "measured") continue;
     const shots = await frames(video, [0.2, 0.55, 0.92], id);
@@ -743,18 +740,7 @@ async function readKeepGoing(
             build: { _tag: "build", build: final },
           }),
         )));
-  const setup = now.botSetup;
   return {
-    ...(setup === undefined
-      ? {}
-      : {
-          botSetup: {
-            state: setup.state,
-            tokens: setup.tokens,
-            minutes: setup.minutes,
-            reason: setup.reason,
-          },
-        }),
     asked: STEPS,
     ending: run.ending,
     seconds: run.seconds,

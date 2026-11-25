@@ -15,7 +15,6 @@ import {
   toPlaywrightKey,
   type GameBrowser,
 } from "./gameChromium.ts";
-import { asGameState } from "./gameBotRuntime.ts";
 import { READ_SCENE, START_SCENE, type PageScene } from "./sceneReport.ts";
 import { chromiumChildEnv } from "./gameChromium.ts";
 import {
@@ -28,7 +27,6 @@ import {
   parseLine,
   sanitizeProbe,
   type PlayEnd,
-  type PlayFrame,
   type PlaySession,
 } from "./playSession.ts";
 
@@ -81,7 +79,6 @@ const looksFlat = (png: Buffer) => {
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 500;
 const MAX_PAGE_ERRORS = 100;
-const TICK_MS = 100;
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -656,9 +653,8 @@ export const openWebPlaySession = async (input: {
       }
       pending.push({ level, text: text.slice(0, MAX_MESSAGE_CHARS) });
     };
-    // Page errors and console errors for the tick stream, with the stack as `where`.
+    // Page errors, with the stack as `where`: the first says why a page did not boot.
     const pageErrors: Array<{ message: string; where: string }> = [];
-    let pageErrorsSeen = 0;
     const pageError = (message: string, stack: string | undefined): void => {
       if (pageErrors.length < MAX_PAGE_ERRORS)
         pageErrors.push({ message: message.slice(0, 500), where: (stack ?? "").slice(0, 200) });
@@ -734,28 +730,6 @@ export const openWebPlaySession = async (input: {
           : cause instanceof Error && cause.name === "TargetClosedError"
             ? new WebBrowserGone(cause.message)
             : cause;
-    // The page's frame count and clock as of the last state read; frames carry them.
-    let pageFrames = 0;
-    let pageSeconds = 0;
-    // The frame counter and clock a picture is tagged with, read again as
-    // pictures arrive (one read in flight), so they stay the page's own between
-    // ticks and after play: a counter that stops means the page stopped.
-    let reading = false;
-    const refreshCounters = () => {
-      if (reading) return;
-      reading = true;
-      void bounded(
-        page
-          .evaluate("[window.__kurambitFrames ?? 0, window.__kurambitTime ?? 0]")
-          .catch(() => null),
-        PLAY_BOUNDS.webCallMs,
-      ).then((raw) => {
-        reading = false;
-        if (!Array.isArray(raw)) return;
-        if (typeof raw[0] === "number") pageFrames = raw[0];
-        if (typeof raw[1] === "number") pageSeconds = raw[1];
-      });
-    };
     // A software GPU that is busy or restarting can hand the compositor an empty canvas although
     // the game drew: a proof picture came back black while its own frame counted 8 draws. A flat
     // still is taken again once the page has drawn twice more (or a quarter second has passed).
@@ -787,18 +761,11 @@ export const openWebPlaySession = async (input: {
     /** The page's state; TIMED_OUT when its main thread did not answer in `ms`. */
     const readState = async (ms: number) => {
       const raw = await bounded(
-        page
-          .evaluate(
-            `[${READ_STUDIO_STATE}, window.__kurambitFrames ?? 0, window.__kurambitTime ?? 0]`,
-          )
-          .catch(() => null),
+        page.evaluate(READ_STUDIO_STATE).catch(() => null),
         ms,
       );
       if (raw === TIMED_OUT) return TIMED_OUT;
-      if (!Array.isArray(raw)) return null;
-      if (typeof raw[1] === "number") pageFrames = raw[1];
-      if (typeof raw[2] === "number") pageSeconds = raw[2];
-      return typeof raw[0] === "string" ? parseLine(raw[0]) : null;
+      return typeof raw === "string" ? parseLine(raw) : null;
     };
     try {
       const bootDeadline = Date.now() + input.bootTimeoutMs;
@@ -1044,26 +1011,14 @@ export const openWebPlaySession = async (input: {
       if ("end" in done) throw endError(done.end);
       return done;
     };
-    // Real-time play: the host paces the ticks, since the page streams nothing.
-    let tickStart = 0;
-    let realtimeSeconds = 0;
-    let ticks = 0;
     const keysDown = new Set<string>();
     const refused: Array<{ target: string; error: string }> = [];
-    let screencast: Awaited<ReturnType<typeof context.newCDPSession>> | null = null;
-    // The compositor sends a picture only when the page drew a different one,
-    // so a static screen sends none; the host repeats the last picture with the
-    // page's advanced frame counter, and only a page that stopped drawing stalls.
-    let frameSink: ((frame: PlayFrame) => void) | null = null;
-    let lastJpeg: Buffer | null = null;
-    let lastSentFrame = -1;
-    const gameT = () => Math.max(0, pageSeconds - realtimeSeconds);
     let kept: KeptStorage | null = null;
     let perf: unknown = null;
     let scene: PageScene = input.sceneReport === true && sceneStarted === null ? "no-shell" : null;
     const session: WebPlaySession = {
       protocol: PLAY_SESSION_PROTOCOL,
-      capabilities: new Set(["realtime", "setState", "frames"]),
+      capabilities: new Set(["setState"]),
       boot: { probe: bootProbe, consoleMessages: bootConsole.messages },
       bootPerf: null,
       ended,
@@ -1158,86 +1113,7 @@ export const openWebPlaySession = async (input: {
         };
       },
       act,
-      realtime: async (frames) => {
-        realtimeSeconds = pageSeconds;
-        tickStart = 0;
-        if (frames === undefined) return;
-        frameSink = frames.onFrame;
-        // A video that never starts is our browser's failure: claimed as a
-        // video it would read as a game that drew nothing.
-        const opening = context.newCDPSession(page).catch((cause: unknown) => {
-          throw classify(cause);
-        });
-        const cdp = await bounded(opening, PLAY_BOUNDS.webCallMs);
-        if (cdp === TIMED_OUT) {
-          void opening.then((late) => late.detach()).catch(() => undefined);
-          throw new WebBrowserGone("The browser did not start its screencast.");
-        }
-        screencast = cdp;
-        cdp.on("Page.screencastFrame", (event) => {
-          void cdp
-            .send("Page.screencastFrameAck", { sessionId: event.sessionId })
-            .catch(() => undefined);
-          lastJpeg = Buffer.from(event.data, "base64");
-          lastSentFrame = pageFrames;
-          frames.onFrame({ frame: pageFrames, t: gameT(), jpeg: lastJpeg });
-          refreshCounters();
-        });
-        const width = Math.min(frames.width, input.width);
-        const started = await bounded(
-          cdp
-            .send("Page.startScreencast", {
-              format: "jpeg",
-              quality: 75,
-              maxWidth: width,
-              maxHeight: Math.round((input.height * width) / input.width),
-            })
-            .catch((cause: unknown) => {
-              throw classify(cause);
-            }),
-          PLAY_BOUNDS.webCallMs,
-        );
-        if (started === TIMED_OUT)
-          throw new WebBrowserGone("The browser did not start its screencast.");
-      },
-      nextTick: async (timeoutMs) => {
-        if (endedWith !== null) return { kind: "closed" };
-        const wait = tickStart + TICK_MS - Date.now();
-        if (wait > 0) await sleep(wait);
-        tickStart = Date.now();
-        const state = await Promise.race([
-          readState(timeoutMs),
-          ended.then(() => "ended" as const),
-        ]);
-        if (state === "ended") return { kind: "closed" };
-        if (state === TIMED_OUT) return { kind: "timeout" };
-        if (state === null) return { kind: "timeout" };
-        ticks += 1;
-        if (frameSink !== null && lastJpeg !== null && pageFrames > lastSentFrame) {
-          lastSentFrame = pageFrames;
-          frameSink({ frame: pageFrames, t: gameT(), jpeg: lastJpeg });
-        }
-        const errors = pageErrors
-          .slice(pageErrorsSeen)
-          .map((entry) => ({ ...entry, kind: "page" as const }));
-        pageErrorsSeen = pageErrors.length;
-        const player = sanitizeProbe({ gameState: {}, player: state["player"] })?.player ?? null;
-        return {
-          kind: "tick",
-          observation: {
-            op: "tick",
-            tick: ticks,
-            t: gameT(),
-            probe: {
-              gameState: asGameState(state["gameState"]),
-              player,
-              hudText: typeof state["hudText"] === "string" ? state["hudText"] : "",
-            },
-            errors,
-          },
-        };
-      },
-      // A stuck page's input never lands; the next tick reads it as not answering.
+      // A stuck page's input never lands; the next read finds it not answering.
       input: async ({ held, taps, clicks }) => {
         const call = (work: Promise<unknown>) =>
           bounded(
@@ -1300,12 +1176,6 @@ export const openWebPlaySession = async (input: {
       // Once, and never failing: the bot loop and its launch both close the
       // session, and a page our own bound already gave up on has nothing to answer.
       close: once(async () => {
-        frameSink = null;
-        if (screencast !== null)
-          await bounded(
-            screencast.send("Page.stopScreencast").catch(() => undefined),
-            PLAY_BOUNDS.webCallMs,
-          );
         try {
           if (endedWith === null) {
             const text = await bounded(

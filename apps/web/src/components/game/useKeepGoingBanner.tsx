@@ -159,7 +159,6 @@ export function useKeepGoingBanner(
               <TooltipPopup side="top">{view.title}</TooltipPopup>
             </Tooltip>
           ),
-          ...(view.note === null ? {} : { description: view.note }),
           actions: stop,
         },
       };

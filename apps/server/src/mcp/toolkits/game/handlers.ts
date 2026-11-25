@@ -21,7 +21,6 @@ import {
   GameBlenderLookScreenshot,
   GameBlenderPaintResult,
   GameBlenderSceneResult,
-  GameBotRunResult,
   GameBuildFacts,
   type GameBuild,
   GameBuildRestoreResult,
@@ -48,7 +47,6 @@ import {
 } from "@kurambit/contracts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
-import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import { CheckpointStore } from "../../../checkpointing/CheckpointStore.ts";
 import * as GameCopies from "../../../game/GameCopies.ts";
@@ -439,10 +437,6 @@ const playHandlers = {
         withGame(GameExplore.GameExplore, (explore, threadId) =>
           explore.evaluate(threadId, evaluation),
         ).pipe(as(GameEvalResult)),
-      bot: (bot) =>
-        withGame(GameBot.GameBot, (bots, threadId) => bots.run(threadId, bot)).pipe(
-          as(GameBotRunResult),
-        ),
       // A save (of the last ended run, or of `run`) or a delete answers with the saved plays as
       // they are then; a run, with its moment as an image; else the saved plays replay.
       replay: (input) =>

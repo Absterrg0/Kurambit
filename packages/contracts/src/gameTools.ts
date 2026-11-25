@@ -13,7 +13,6 @@ import {
   GameBlenderLookInput,
   GameBlenderPaintInput,
 } from "./gameBlender.ts";
-import { GameBotRunInput } from "./gameBot.ts";
 import { ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameEvalInput, GameExploreCloseInput, GamePlayActInput } from "./gameExplore.ts";
@@ -59,7 +58,6 @@ export type GameCheckToolInput = typeof GameCheckToolInput.Type;
 export const GamePlayToolInput = Schema.Struct({
   act: op(GamePlayActInput),
   close: op(GameExploreCloseInput),
-  bot: op(GameBotRunInput),
   replay: op(
     Schema.Struct({
       save: Schema.optionalKey(Schema.String),

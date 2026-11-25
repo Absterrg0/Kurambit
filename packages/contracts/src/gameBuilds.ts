@@ -21,15 +21,8 @@ export { GameBuildId } from "./gameBuildId.ts";
 /** Bounds of one measurement, the same for every engine. */
 export const GAME_FACTS_BOUNDS = {
   masherSeconds: 60,
-  skilledSeconds: 60,
   startSeconds: 10,
 } as const;
-
-/** The skilled fact of a game whose own code never ends a run with a win. */
-export const GAME_FACTS_NO_WIN = "the game's code never calls win(): it has no ending to prove";
-/** The skilled fact of a game with no play bot yet. */
-export const GAME_FACTS_NO_PLAY_BOT =
-  "no play bot: ask your agent to prove the game can be won, and it writes one";
 
 /** Push names on the game's operation stream: the list changed, or a build's facts did. */
 export const GAME_BUILDS_EVENT = "builds";
@@ -144,7 +137,7 @@ export type GameFactsState = typeof GameFactsState.Type;
  * The facts measured now, in display order: the shared names of the rail, compare, card and
  * tools. Only what a person acts on: does it start, does it play without errors, do the QA
  * play's controls, Retry and HUD hold, does it keep its frame rate, do the game's saved plays
- * still end the same, and (only when someone asks) can Kurambit's play bot win it.
+ * still end the same.
  */
 const MEASURED_FACT_IDS = [
   "boots",
@@ -156,7 +149,6 @@ const MEASURED_FACT_IDS = [
   "screens",
   "first-minute",
   "saved-plays",
-  "skilled",
 ] as const;
 export type GameMeasuredFactId = (typeof MEASURED_FACT_IDS)[number];
 const GAME_FACT_IDS: ReadonlyArray<GameMeasuredFactId> = MEASURED_FACT_IDS;
@@ -169,6 +161,7 @@ export const GameFactId = Schema.Literals([
   ...MEASURED_FACT_IDS,
   "idle",
   "masher",
+  "skilled",
   "motion",
   "detail",
   "first-response",
@@ -281,21 +274,14 @@ export type GameBuild = typeof GameBuild.Type;
  * - busy: other work held the machine; the next measure takes it again.
  * - slow: the game itself ran below real time on an idle machine (a step can make it faster).
  * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
- * - no-play-bot: the game has no play bot to measure skilled play with.
- * - deferred: rows from before every measure played the play bot; measuring again plays it.
  * - no-saved-plays: the game had no saved play to replay. Such a fact is not shown at all.
- * - no-win: the game's code never calls win(): it has no ending to prove. Such a fact is not
- *   shown, compared or counted.
  */
 export const GameFactNotMeasuredCause = Schema.Literals([
   "software",
   "busy",
   "slow",
   "old-shell",
-  "no-play-bot",
-  "deferred",
   "no-saved-plays",
-  "no-win",
 ]);
 export type GameFactNotMeasuredCause = typeof GameFactNotMeasuredCause.Type;
 
@@ -359,12 +345,6 @@ export const GameBotTier = Schema.Struct({
   /** The trace and video folder, relative to the game root. */
   evidence: Schema.NullOr(Schema.String),
 });
-export const GameSkilledTier = Schema.Struct({
-  ...GameBotTier.fields,
-  bot: Schema.Struct({ file: Schema.String, hash: Schema.String }),
-  /** The bot's own end word when the game reported no result. */
-  botWord: Schema.NullOr(Schema.String),
-});
 /** The most readings a performance fact keeps of its frame rate through play. */
 export const GAME_PERFORMANCE_SERIES_MAX = 120;
 /**
@@ -417,8 +397,6 @@ export const GameBuildFacts = Schema.Struct({
   boots: gameFact(Schema.Struct({ ok: Schema.Boolean, detail: Schema.String })),
   /** The random-input play: whether it crashes or stops answering (errors), and its frame times. */
   masher: gameFact(GameBotTier),
-  /** Kurambit's play bot, only when the person or their agent asks to prove it can be won. */
-  skilled: gameFact(GameSkilledTier),
   /** Measured during the random-input play: frame rate, 1% low, GPU time, render scale, draw calls and triangles. */
   performance: gameFact(GamePerformance).pipe(
     Schema.withDecodingDefault(
@@ -576,24 +554,6 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
 const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 const at = (tier: BotTier) => (tier.at === null ? "" : ` at ${seconds(tier.at)}`);
 
-/** Kurambit's play bot's ending; a run that broke is the errors check's, so it is counted once. */
-const tierText = (tier: BotTier) => {
-  switch (tier.ending) {
-    case "won":
-      return `Kurambit's play bot wins${at(tier)}`;
-    case "lost":
-      return `Kurambit's play bot loses${at(tier)}`;
-    case "no-ending":
-      return `Kurambit's play bot: no ending in ${seconds(tier.played)}`;
-    case "crashed":
-      return `Crashed${at(tier)}`;
-    case "unresponsive":
-      return `Stopped answering${at(tier)}`;
-    case "did-not-boot":
-      return "Did not boot";
-  }
-};
-
 /** A bot run's evidence folder as display entries. */
 const tierEvidence = (tier: BotTier): GameFactView["evidence"] =>
   tier.evidence === null
@@ -634,10 +594,7 @@ const from = <A>(fact: Fact<A>, read: (value: A) => Reading): Read =>
 
 const BROKE_ENDINGS: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 /** The plays that can show the game breaking, the one most likely to first. */
-const PLAYS = [
-  ["masher", "with random input"],
-  ["skilled", "by Kurambit's play bot"],
-] as const;
+const PLAYS = [["masher", "with random input"]] as const;
 /** The first play that broke (crashed, stopped answering, did not start), with who played it. */
 const brokenPlay = (facts: GameBuildFacts) => {
   for (const [id, who] of PLAYS) {
@@ -706,14 +663,6 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
         value: null,
         tone: boots.ok ? "good" : "bad",
         kind: String(boots.ok),
-      }));
-    case "skilled":
-      // Only a win proves something: that the game can be won.
-      return from(facts.skilled, (tier) => ({
-        text: tierText(tier),
-        value: tier.at,
-        tone: tier.ending === "won" ? "good" : "neutral",
-        kind: tier.ending,
       }));
     case "errors":
       return readErrors(facts);
@@ -866,8 +815,6 @@ const drawCounts = (perf: GamePerformance): ReadonlyArray<string> => {
 const measured = (reading: Reading): Read => ({ _tag: "measured", reading });
 const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView["evidence"] => {
   switch (id) {
-    case "skilled":
-      return facts.skilled.status === "measured" ? tierEvidence(facts.skilled.value) : [];
     case "errors": {
       const broke = brokenPlay(facts);
       return broke === null ? [] : tierEvidence(broke.tier);
@@ -899,16 +846,8 @@ const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView
 /** A game with no saved play has no Saved plays fact: none is shown, compared or counted. */
 export const noSavedPlays = (facts: Pick<GameBuildFacts, "savedPlays">): boolean =>
   facts.savedPlays.status === "not-measured" && facts.savedPlays.cause === "no-saved-plays";
-/**
- * A game whose code never calls win() has no "can be won" fact: none is shown, compared or
- * counted. Read from the build's code (GameFacts), never from how one play ended.
- */
-export const noWin = (facts: Pick<GameBuildFacts, "skilled">): boolean =>
-  facts.skilled.status === "not-measured" && facts.skilled.cause === "no-win";
 const shownIds = (facts: GameBuildFacts) =>
-  GAME_FACT_IDS.filter(
-    (id) => !(id === "saved-plays" && noSavedPlays(facts)) && !(id === "skilled" && noWin(facts)),
-  );
+  GAME_FACT_IDS.filter((id) => !(id === "saved-plays" && noSavedPlays(facts)));
 
 /**
  * PURE. A build's facts as display rows, in GameFactId order. The one wording
@@ -955,7 +894,6 @@ export const GAME_LEAD_FACTS = [
   "screens",
   "first-minute",
   "saved-plays",
-  "skilled",
 ] as const satisfies ReadonlyArray<GameMeasuredFactId>;
 
 /** A lead fact as a check: one plain sentence, its value apart for the right edge. */
@@ -963,8 +901,6 @@ export interface GameCheck extends GameFactView {
   readonly sentence: string;
   /** The reading's number or time ("at 4.4 s", "60 fps"); null when the sentence says it all. */
   readonly value: string | null;
-  /** A measured bot run's ending; null for every other fact. */
-  readonly ending: typeof GameBotEnding.Type | null;
 }
 
 export interface GameChecksView {
@@ -986,7 +922,6 @@ const CHECK_LABELS: Readonly<
   screens: "Fits phone and widescreen",
   "first-minute": "The first minute plays clean",
   "saved-plays": "Test plays replay the same",
-  skilled: "Can be won by Kurambit's play bot",
 };
 
 /**
@@ -997,30 +932,6 @@ const CHECK_LABELS: Readonly<
 export const gameFactName = (id: GameFactId): string => CHECK_LABELS[id] ?? LABELS[id];
 
 const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.at)}`);
-
-/** A bot tier's ending as a check: who played and what it came to. */
-const tierCheck = (
-  who: "with random input" | "by Kurambit's play bot",
-  tier: BotTier,
-): { sentence: string; value: string | null } => {
-  switch (tier.ending) {
-    case "won":
-      return { sentence: "Can be won by Kurambit's play bot", value: atTime(tier) };
-    case "lost":
-      return { sentence: "Kurambit's play bot loses", value: atTime(tier) };
-    case "no-ending":
-      return {
-        sentence: "Kurambit's play bot finds no ending",
-        value: `in ${seconds(tier.played)}`,
-      };
-    case "crashed":
-      return { sentence: `Crashes when played ${who}`, value: atTime(tier) };
-    case "unresponsive":
-      return { sentence: `Stops answering when played ${who}`, value: atTime(tier) };
-    case "did-not-boot":
-      return { sentence: "Does not start", value: null };
-  }
-};
 
 const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`;
@@ -1043,20 +954,6 @@ const checkWords = (
           : // The check's name, as every check has one; what stopped it is in the row's
             // tooltip and on the Stage's error bar.
             { sentence: "Does not start", value: null };
-    case "skilled": {
-      if (facts.skilled.status !== "measured") return null;
-      const tier = facts.skilled.value;
-      // Only a win proves the game can be won; anything short of one leaves it unproven.
-      if (tier.ending === "won" || BROKE_ENDINGS.has(tier.ending))
-        return tierCheck("by Kurambit's play bot", tier);
-      return {
-        sentence: "Not yet proven winnable",
-        value:
-          tier.ending === "lost"
-            ? `Kurambit's play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`
-            : `Kurambit's play bot found no ending in ${seconds(tier.played)}`,
-      };
-    }
     case "errors": {
       const broke = brokenPlay(facts);
       if (broke !== null)
@@ -1191,12 +1088,10 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
     const words = view.reading._tag === "measured" ? checkWords(facts, view.id) : null;
     const fallback =
       view.reading._tag === "measured" ? view.reading.text : (CHECK_LABELS[view.id] ?? view.label);
-    const run = view.id === "skilled" ? facts.skilled : null;
     return {
       ...view,
       sentence: words?.sentence ?? fallback,
       value: words?.value ?? null,
-      ending: run?.status === "measured" ? run.value.ending : null,
     };
   };
   const checks = GAME_LEAD_FACTS.flatMap((id) => {
@@ -1221,7 +1116,6 @@ const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
   "saved-plays",
 ]);
 const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance"]);
-const BROKE = BROKE_ENDINGS;
 /** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
 const rank = (id: GameFactId, kind: string): number | null => {
   switch (id) {
@@ -1234,8 +1128,6 @@ const rank = (id: GameFactId, kind: string): number | null => {
       return kind === "clean" ? 1 : 0;
     case "screens":
       return kind === "fits" ? 1 : 0;
-    case "skilled":
-      return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
     case "saved-plays":
       return kind === "same" ? 2 : kind === "differs" ? 1 : 0;
     default:
@@ -1273,9 +1165,6 @@ export const diffBuildFacts = (
     // Saved plays are compared only once some were replayed on either side.
     if (id === "saved-plays" && (a === null || noSavedPlays(a)) && (b === null || noSavedPlays(b)))
       return [];
-    // Nor is winning, between builds of a game with no ending.
-    const measured = [a, b].filter((side) => side !== null);
-    if (id === "skilled" && measured.length > 0 && measured.every(noWin)) return [];
     return [diffFact(id, a, b, sides)];
   });
 
@@ -1321,13 +1210,6 @@ const diffFact = (
       textA,
       textB,
     );
-  if (
-    id === "skilled" &&
-    a.skilled.status === "measured" &&
-    b.skilled.status === "measured" &&
-    a.skilled.value.bot.hash !== b.skilled.value.bot.hash
-  )
-    return notComparable(id, "the play bot changed between the two measurements", textA, textB);
   if (
     id === "saved-plays" &&
     a.savedPlays.status === "measured" &&

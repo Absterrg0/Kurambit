@@ -9,9 +9,9 @@ describe("facts as drawn", () => {
   it("never marks a not-comparable fact", () => {
     const lines = FAKE_DELTAS.map(deltaLine);
     expect(lines.map((line) => line.mark)).toEqual(["↑", "↑", "↓", "=", "≠", null]);
-    const skilled = lines.at(-1);
-    expect(skilled?.tone).toBeNull();
-    expect(skilled?.why).toBe("Not comparable: this game has no skilled bot");
+    const saved = lines.at(-1);
+    expect(saved?.tone).toBeNull();
+    expect(saved?.why).toBe("Not comparable: the saved plays changed between the two measurements");
     expect(lines[1]?.tone).toBe("worse");
   });
 });
@@ -68,29 +68,22 @@ describe("a compare's rows", () => {
 });
 
 describe("a compare's cells", () => {
-  it("say a run's ending and a number from the readings, not from their words", () => {
+  it("say a number from the readings, not from their words", () => {
     const measured = (value: number) =>
       ({ _tag: "measured", text: "", value, tone: "neutral" }) as const;
-    const delta = (id: "masher" | "motion", a: string, b: string) =>
-      ({ id, label: id, a, b, change: "changed", tone: "neutral", why: null }) as const;
-    const check = (id: "masher" | "motion", value: number, ending: "lost" | "won" | null) => ({
-      id,
-      sentence: "Anything",
-      value: ending === null ? null : "at 4.8 s",
-      reading: measured(value),
-      ending,
-    });
-    const side = (ending: "lost" | "won", motion: number) => [
-      check("masher", 4.8, ending),
-      check("motion", motion, null),
+    const delta = {
+      id: "motion",
+      label: "motion",
+      a: "x",
+      b: "y",
+      change: "changed",
+      tone: "neutral",
+      why: null,
+    } as const;
+    const side = (motion: number) => [
+      { id: "motion" as const, sentence: "Anything", value: null, reading: measured(motion) },
     ];
-    const { rows } = compareRows([delta("masher", "x", "y"), delta("motion", "x", "y")], [], [], {
-      a: side("lost", 3.21),
-      b: side("won", 7.5),
-    });
-    expect(rows.map((row) => [row.id, row.a, row.b])).toEqual([
-      ["masher", "Lost at 4.8 s", "Won at 4.8 s"],
-      ["motion", "3.2", "7.5"],
-    ]);
+    const { rows } = compareRows([delta], [], [], { a: side(3.21), b: side(7.5) });
+    expect(rows.map((row) => [row.id, row.a, row.b])).toEqual([["motion", "3.2", "7.5"]]);
   });
 });

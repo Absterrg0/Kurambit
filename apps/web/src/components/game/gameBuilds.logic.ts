@@ -159,10 +159,7 @@ const CAUSE_WORDS: Readonly<Record<GameFactNotMeasuredCause, string>> = {
   busy: "this computer was busy with other work, so the reading says nothing about the game; the next measure takes it again",
   slow: "the game ran slower than real time on this computer, too slowly to play through in time",
   "old-shell": "the game was made before Kurambit measured this; a new build adds it",
-  "no-play-bot": "no play bot yet; ask your agent for one",
-  deferred: "the play bot plays a build when you measure it",
   "no-saved-plays": "no test play is saved yet: save a run from the Stage's menu",
-  "no-win": "the game has no ending to win",
 };
 
 /** PURE. Why a fact has no reading, as a person reads it: its cause's words, else the build's own reason. */
@@ -171,17 +168,8 @@ export const notMeasuredWhy = (reading: {
   readonly cause?: GameFactNotMeasuredCause;
 }): string => (reading.cause === undefined ? reading.why : CAUSE_WORDS[reading.cause]);
 
-/** The bot runs, whose readings are an event and its time. */
-const RUN_FACTS: ReadonlySet<GameFactId> = new Set(["idle", "masher", "skilled"]);
-/** A run's ending in a word: "Random input loses" is "Lost". */
-const RUN_EVENTS: Readonly<Record<NonNullable<GameCheck["ending"]>, string>> = {
-  won: "Won",
-  lost: "Lost",
-  "no-ending": "No ending",
-  crashed: "Crashed",
-  unresponsive: "Stopped answering",
-  "did-not-boot": "Did not start",
-};
+/** The plays, whose readings are an event and its time. */
+const RUN_FACTS: ReadonlySet<GameFactId> = new Set(["idle", "masher"]);
 /**
  * What a row's reading means, said under it when it differs: its scale. That a reading varies
  * by itself is said once, by the headline and the row's "Varies".
@@ -284,8 +272,8 @@ export const compareRows = (
   viewsB: ReadonlyArray<GameFactView>,
   /** Each side's checks as the Inspector words them, so a cell says its reading, not its row. */
   checks?: {
-    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading" | "ending">>;
-    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading" | "ending">>;
+    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading">>;
+    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading">>;
   },
 ): CompareRows => {
   // A reading in the Inspector's words: its number when it has one ("at 7.9 s"), with its
@@ -300,9 +288,6 @@ export const compareRows = (
     if (fallback === null) return null;
     const check = checks?.[side].find((entry) => entry.id === id);
     if (check === undefined) return fallback;
-    // A bot run's reading names what happened, not only when: "Lost at 4.8 s".
-    if (RUN_FACTS.has(id) && check.ending !== null && check.value !== null)
-      return `${RUN_EVENTS[check.ending]} ${check.value}`;
     // Motion is a number, named by the row: just the number.
     const number = check.reading._tag === "measured" ? check.reading.value : null;
     if (number !== null && id === "motion") return number.toFixed(1);

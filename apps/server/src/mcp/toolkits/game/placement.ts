@@ -14,7 +14,6 @@ export const GAME_TOOL_OPS = {
   game_play: {
     act: ["play"],
     close: ["play"],
-    bot: ["play"],
     replay: ["tune"],
     eval: ["play"],
     model_sheet: ["tune"],
@@ -107,7 +106,8 @@ export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
   game_explore_start: "game_play op act with no sessionId (it opens one)",
   game_explore_act: "game_play op act",
   game_explore_close: "game_play op close",
-  game_bot_run: "game_play op bot",
+  game_bot_run:
+    "nothing: the play bot is gone; a run the person or you played can be saved as a test play (game_play op replay {save, run})",
   game_bot_view: "game_play op replay {run, at}",
   game_replay: "game_play op replay",
   game_model_sheet: "game_play op model_sheet",
@@ -155,6 +155,8 @@ const RETIRED_GAME_OPS: Readonly<Record<string, string>> = {
   "game_play.preview": "the person's Stage; game_check op look",
   "game_play.start": "game_play op act with no sessionId (it opens one)",
   "game_play.bot_view": "game_play op replay {run, at}",
+  "game_play.bot":
+    "nothing: the play bot is gone; a run the person or you played can be saved as a test play (game_play op replay {save, run})",
   "game_assets.image_edit": "nothing: generated art is gone; make it in Blender or code",
   "game_assets.import": "nothing: a three.js game loads web/ files as they are",
   "game_assets.mine": "nothing: the personal Library is gone",

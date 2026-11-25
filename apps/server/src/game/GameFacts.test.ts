@@ -38,7 +38,7 @@ describe("GameFacts supersede", () => {
               onStop: () => Effect.void,
               plays: () => [],
             }),
-            Layer.mock(GameBot.GameBot)({ latestPlayBot: () => Effect.succeed(null) }),
+            Layer.mock(GameBot.GameBot)({}),
             Layer.mock(GameOperations.GameOperations)({
               current: () => null,
               events: Stream.empty,

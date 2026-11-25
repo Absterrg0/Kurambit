@@ -42,14 +42,6 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   renderer: "GPU",
   boots: { status: "measured", value: { ok: true, detail: "" } },
   masher: tier("lost", 20),
-  skilled: {
-    status: "measured",
-    value: {
-      ...tier("won", 40).value,
-      bot: { file: ".studio/bot/play.mjs", hash: "x" },
-      botWord: null,
-    },
-  },
   use: { status: "not-measured", why: "not played", retry: false },
   performance: { status: "not-measured", why: "not played", retry: false },
   qa: { status: "measured", value: qaReport(0) },
@@ -66,16 +58,6 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
 });
 /** A build whose QA play found `dead` declared controls the game never reads. */
 const deadControls = (dead: number) => facts({ qa: { status: "measured", value: qaReport(dead) } });
-const skilledWith = (ending: Ending, hash = "x"): Partial<GameBuildFacts> => ({
-  skilled: {
-    status: "measured",
-    value: {
-      ...tier(ending, 40).value,
-      bot: { file: ".studio/bot/play.mjs", hash },
-      botWord: null,
-    },
-  },
-});
 
 const state = (patch: Partial<RunState> = {}): RunState => ({
   profile: "autopilot",
@@ -130,7 +112,6 @@ const look = (patch: Partial<Loop.LookResult> = {}): Loop.LookResult => ({
   current: BASE,
   facts: facts(),
   next: { text: "Add a score counter." },
-  bot: true,
   edited: false,
   ...patch,
 });
@@ -167,23 +148,21 @@ describe("worse", () => {
     ).toEqual([]);
   });
 
-  it("never undoes on one run of the play bot or a check: shown, proposed, never guarded", () => {
-    expect(broke(facts(), facts(skilledWith("lost")))).toEqual([]);
+  it("never undoes on a check alone: shown, proposed, never guarded", () => {
     expect(broke(deadControls(0), deadControls(1))).toEqual([]);
     expect(broke(facts(), facts({ masher: tier("won", 9) }))).toEqual([]);
   });
 
-  it("never counts what cannot be compared: a renderer, a harness or a bot that changed", () => {
+  it("never counts what cannot be compared: a renderer or a harness that changed", () => {
     const crashed = facts({
       boots: { status: "measured", value: { ok: false, detail: "throws" } },
     });
     expect(Loop.regressions(facts(), { ...crashed, renderer: "SwiftShader" })).toEqual([]);
     expect(Loop.regressions(facts(), { ...crashed, harness: "h2" })).toEqual([]);
-    expect(Loop.regressions(facts(), facts(skilledWith("lost", "y")))).toEqual([]);
     expect(Loop.regressions(facts(), { ...crashed, boots: { status: "pending" } })).toEqual([]);
   });
 
-  it("undoes a broken step, keeps one the play bot lost, and keeps the unmeasured", () => {
+  it("undoes a broken step, and keeps the unmeasured", () => {
     const broken = facts({ masher: tier("crashed", 12) });
     expect(judged(state(), facts(), broken).plan).toEqual({
       kind: "undo",
@@ -193,7 +172,6 @@ describe("worse", () => {
     // The person's own step is undone too when it breaks the game: it can be redone.
     const asked = cycle(turnStep({ proposal: proposal({ why: "steer", key: "steer:1" }) }));
     expect(judged(state(), facts(), broken, asked).plan?.kind).toBe("undo");
-    expect(judged(state(), facts(), facts(skilledWith("lost"))).record?.step.verdict).toBe("kept");
     const unmeasured = judged(state(), facts(), { ...broken, harness: "h2" });
     expect(unmeasured.plan).toEqual({ kind: "look" });
     expect(unmeasured.record).toMatchObject({
@@ -331,10 +309,6 @@ describe("the proposal", () => {
     expect(Loop.propose(state(), look({ facts: deadControls(1), fresh }))?.why).toBe("fact");
     const critique = { text: "The camera sits higher than the picture's" };
     expect(Loop.propose(state(), look({ critique, fresh }))?.why).toBe("reference");
-  });
-
-  it("never proposes a play bot", () => {
-    expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("next");
   });
 
   // The judge waits only for the boot check, so the random-input play of a step's build may

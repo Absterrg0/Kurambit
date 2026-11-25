@@ -53,23 +53,6 @@ const writeNoFollow = async (file: string, text: string): Promise<void> => {
   await NodeFSP.writeFile(file, text, { flag: "wx" });
 };
 
-/** Appends one line, refusing a link at the file (O_NOFOLLOW where the OS has it). */
-export const appendNoFollow = async (file: string, line: string): Promise<void> => {
-  const handle = await NodeFSP.open(
-    file,
-    NodeFSP.constants.O_WRONLY |
-      NodeFSP.constants.O_APPEND |
-      NodeFSP.constants.O_CREAT |
-      (NodeFSP.constants.O_NOFOLLOW ?? 0),
-    0o644,
-  );
-  try {
-    await handle.appendFile(line);
-  } finally {
-    await handle.close();
-  }
-};
-
 /** Where a kept browser session's localStorage lives in its save location. */
 export const keptWebStorage = (saves: string | null): string | null =>
   saves === null ? null : NodePath.join(saves, "localStorage.json");

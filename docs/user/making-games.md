@@ -8,11 +8,8 @@ older demo shell, still open: see [Games from earlier versions](#games-from-earl
 
 ## Game tools
 
-three.js games play without anything installed, but part of measuring them needs **ffmpeg**:
-Kurambit films each bot play with it, and a build's random-input play (errors, freezes, frame
-rate) is read from that video. Without ffmpeg that play reads **Not measured**, while booting,
-the QA play and saved test plays are still measured; once ffmpeg is installed, measure the build
-again. Art tools are programs you install yourself, the same
+three.js games play and are measured without anything installed. Art tools are programs you
+install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
 **Settings → Game tools** shows each one's status, where it was found, and a **Get**
 button for the vendor's download page when it is missing or the wrong version. After installing
@@ -22,7 +19,7 @@ something, press **Check again**.
   4.5 still run) from [blender.org/download](https://www.blender.org/download/).
 - **MPFB2** is optional: it gives characters built in Blender a human body. See
   [Models](#models).
-- **ffmpeg** records bot plays. Install it with your package manager (`sudo apt install ffmpeg`
+- **ffmpeg** is optional: the asset library draws its contact sheets with it. Install it with your package manager (`sudo apt install ffmpeg`
   on Debian and Ubuntu, `sudo dnf install ffmpeg` on Fedora with RPM Fusion, `brew install ffmpeg`
   on macOS, `winget install ffmpeg` on Windows), or get it from
   [ffmpeg.org/download](https://ffmpeg.org/download.html).
@@ -439,15 +436,15 @@ step carries a step sign, and the build being made waits as a dashed card with i
 appears when the game folder is not any build (edited since, or another build plays from a copy);
 until the Stage has shown the game, its picture is the last build's, dimmed.
 **Older** pages back. Clicking a picture plays that build (an older one from a copy; the game folder
-is never touched, and **Back to the current game** or the newest picture returns) and shows it in the right panel's **Build** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines, each something a player would hit (does it start, does it play without errors, does every control work, does Retry start a clean run, does the HUD fit the screen, does it hold its frame rate (with the draw calls and triangles that cost it), does it fit a phone held upright and a widescreen monitor (and how much it downloads to start), and whether the play bot has proven it can be won) with every other measurement, each in a plain sentence, under **Other measurements**: among them the **First minute**, the game as a player opens it (how long it takes to show, whether a title covers the game, how many presses and seconds to play, the longest text before play, the smallest text on a 1080p screen and a Steam Deck, whether doing nothing loses, how fast Retry gets back to play, whether the first press makes a sound and how loud the mix peaks, and whether Esc pauses), each reading saying why when it could not be measured, what changed in your agent's words (with the files it changed,
+is never touched, and **Back to the current game** or the newest picture returns) and shows it in the right panel's **Build** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines, each something a player would hit (does it start, does it play without errors, does every control work, does Retry start a clean run, does the HUD fit the screen, does it hold its frame rate (with the draw calls and triangles that cost it), does it fit a phone held upright and a widescreen monitor (and how much it downloads to start)) with every other measurement, each in a plain sentence, under **Other measurements**: among them the **First minute**, the game as a player opens it (how long it takes to show, whether a title covers the game, how many presses and seconds to play, the longest text before play, the smallest text on a 1080p screen and a Steam Deck, whether doing nothing loses, how fast Retry gets back to play, whether the first press makes a sound and how loud the mix peaks, and whether Esc pauses), each reading saying why when it could not be measured, what changed in your agent's words (with the files it changed,
 which open the diff), its videos, and in the **⋯** beside the build's name:
 
 - **Undo this build** on any build, which takes that build's change out of the game and keeps every
   build after it. The undo is a build of its own; undoing it is **Redo**. When a later build
   changed the same lines, nothing moves and Kurambit says which files: go back to the build before
   it instead, or ask your agent to take the change out.
-- **Go back** on an older build, which puts it in the game folder: the engine project, `art/`,
-  `ASSETS.md` and the play bot in `.studio/bot` return to that build, and notes and saved media
+- **Go back** on an older build, which puts it in the game folder: the engine project, `art/`
+  and `ASSETS.md` return to that build, and notes and saved media
   stay as they are. What the folder held is saved as a build first, so going back never discards work, and
   **Redo** puts it back.
 
@@ -479,10 +476,8 @@ frames per second, the slowest 1% of frames, the GPU's time per frame and the sh
 resolution it drew at. On a machine where Kurambit's browser cannot use the GPU, performance says
 so instead of guessing.
 
-**Can it be won** needs a play bot: ask your agent to prove the game can be won, and it writes
-one. From then on Kurambit plays it on every build it measures.
-A game with no way to win is never held to one: this is not one of its checks. A game that can be
-won stays **Not yet proven winnable** until the play bot wins it.
+To prove the game can be won, save a winning run as a test play (see **Test plays** below): every
+build after it replays it and says whether it still ends the same.
 Opening or playing a build that was never measured measures it, one build at a time, and a
 three.js game measures each turn's build in the background when the turn ends. A check Kurambit
 could not measure says **Not measured** and why, and never counts as a result: if a tool failed,

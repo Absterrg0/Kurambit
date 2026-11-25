@@ -27,7 +27,7 @@ describe("game tool results", () => {
     for (const [tool, op] of [
       ["game_check", "look"],
       ["game_check", "final"],
-      ["game_play", "bot"],
+      ["game_play", "act"],
     ] as const) {
       const shown = present(tool, op, { line: "ok", next: "none." }, details);
       const text = resultText(shown);

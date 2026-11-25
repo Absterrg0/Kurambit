@@ -11,7 +11,7 @@
  * New game from a brief, the Stage shows a frame, play, Tune a value, Check (look, final), undo,
  * Keep going one step, Blender code, look and export (when the server finds a Blender:
  * KURAMBIT_BLENDER or PATH), export Web. `--old-game <dir>`: a copy of a game made before this
- * checkout opens, is looked at, and its own .studio/bot/play.mjs plays, as it did. `--home` keeps its `tools/` and `caches/` between runs
+ * checkout opens, is looked at and played. `--home` keeps its `tools/` and `caches/` between runs
  * (the headless browser and Blender add-on the server downloads); the rest starts empty.
  */
 import * as NodeCrypto from "node:crypto";
@@ -96,7 +96,7 @@ export function update(dt) {
 
 const BRIEF = "A fish swims across the pond to the reeds.";
 const PHRASES = {
-  old: "Look at this older game and play its bot",
+  old: "Look at this older game and play it",
   play: "Play the pond and see the fish swim",
   check: "Check the pond as a player sees it",
   blender: "Model a rock for the pond in Blender",
@@ -109,12 +109,12 @@ const standinSteps = {
   [PHRASES.step]: [{ write: ["web/main.js", pond("0x7fb0d8", 5)] }, { reply: "Two more reeds." }],
   [PHRASES.old]: [
     { tool: ["game_check", { look: {} }] },
-    { tool: ["game_play", { bot: { file: ".studio/bot/play.mjs", seconds: 45 } }] },
-    { tool: ["game_play", { replay: { run: "$last.runId", at: 5 } }] },
+    { tool: ["game_play", { act: { steps: [{ press: "Space" }, { waitMs: 3000 }] } }] },
+    { tool: ["game_play", { close: { sessionId: "$last.sessionId" } }] },
   ],
   [PHRASES.play]: [
-    // Its first act opens the session.
-    { tool: ["game_play", { act: { steps: [{ press: "Space" }, { waitMs: 800 }] } }] },
+    // Its first act opens the session; the fish reaches the reeds within it, so the run is won.
+    { tool: ["game_play", { act: { steps: [{ press: "Space" }, { waitMs: 8000 }] } }] },
     {
       tool: [
         "game_play",
@@ -127,15 +127,9 @@ const standinSteps = {
       ],
     },
     { tool: ["game_play", { close: { sessionId: "$last.sessionId" } }] },
-    // A stepped bot plays the run on its own clock; its one id names the play replay shows.
-    {
-      write: [
-        ".studio/bot/swim.mjs",
-        'export const goal = "Reach the reeds";\nexport function decide() {\n  return ["swim"];\n}\n',
-      ],
-    },
-    { tool: ["game_play", { bot: { file: ".studio/bot/swim.mjs", seconds: 30 } }] },
-    { tool: ["game_play", { replay: { run: "$last.runId", at: 2 } }] },
+    // The session's won run, kept as it closed, saved as a test play and replayed.
+    { tool: ["game_play", { replay: { save: "Reach the reeds" } }] },
+    { tool: ["game_play", { replay: {} }] },
   ],
   [PHRASES.check]: [
     { tool: ["game_check", { look: {} }] },
@@ -557,18 +551,19 @@ async function main() {
       succeeded(answers[2], "game_play close");
       const value = evaluated.answer.structuredContent?.value as { canvases?: number } | undefined;
       expect((value?.canvases ?? 0) > 0, "eval found no canvas in the playing page");
-      const bot = succeeded(answers[3], "game_play bot").answer.structuredContent ?? {};
-      const final = bot.finalState as { result?: string } | undefined;
+      const saved = (succeeded(answers[3], "game_play replay save").answer.structuredContent
+        ?.saved ?? []) as ReadonlyArray<{ name?: string; outcome?: { won?: boolean } }>;
+      const reeds = saved.find((play) => play.name === "Reach the reeds");
       expect(
-        final?.result === "won",
-        `the stepped bot did not win: ${textOf(answers[3]!).slice(0, 300)}`,
+        reeds?.outcome?.won === true,
+        `the played run was not saved as a won test play: ${textOf(answers[3]!).slice(0, 300)}`,
       );
-      succeeded(answers[4], "game_play replay of the bot's run");
+      succeeded(answers[4], "game_play replay of the saved plays");
       const result = act.answer.structuredContent ?? {};
       expect(typeof result.screenshotPath === "string", "the play answered no frame");
       const player = (result.probe as { player?: { x?: number } } | null)?.player;
       expect(typeof player?.x === "number" && player.x > -6, "the fish did not swim while played");
-      return `played ${result.nominalMs} ms of game; the fish swam to x ${player!.x!.toFixed(1)}; eval saw ${value!.canvases} canvas; the bot won at ${String(bot.gameSeconds)} s, ${String(bot.timeRatio)}× real time`;
+      return `played ${result.nominalMs} ms of game; the fish swam to x ${player!.x!.toFixed(1)}; eval saw ${value!.canvases} canvas; the won run saved and replayed as a test play`;
     });
 
     let tuned!: GameBuild;
@@ -700,7 +695,7 @@ async function main() {
     });
     const oldGame = args["old-game"];
     if (oldGame !== undefined)
-      await path("an older game opens, plays and runs its bot", async () => {
+      await path("an older game opens and plays", async () => {
         const copy = NodePath.join(gamesDir, `old-${NodePath.basename(oldGame)}`);
         await NodeFSP.rm(copy, { recursive: true, force: true });
         await NodeFSP.cp(NodePath.resolve(oldGame), copy, { recursive: true });
@@ -709,11 +704,9 @@ async function main() {
         );
         const answers = await say(opened.threadId, PHRASES.old);
         const look = succeeded(answers[0], "the older game's look");
-        const bot = succeeded(answers[1], "the older game's bot").answer.structuredContent ?? {};
-        const status = bot.status as { state?: string; note?: string } | undefined;
-        expect(bot.played !== false, `its bot did not play: ${status?.note ?? ""}`);
-        const replayed = answers[2]?.answer.isError !== true;
-        return `look ${imagesOf(look)} image(s); its kit bot ended ${status?.state} at ${String(bot.gameSeconds)} s (${String(bot.timeRatio)}× real time)${replayed ? ", its run replays by the bot's id" : ", no ended run to replay"}`;
+        const act = succeeded(answers[1], "the older game's play").answer.structuredContent ?? {};
+        succeeded(answers[2], "the older game's close");
+        return `look ${imagesOf(look)} image(s); played ${String(act.nominalMs)} ms of game`;
       });
   } finally {
     await server.stop();

@@ -13,22 +13,9 @@ export const BuildName = {
   restoreAfter: (requestId: string) => `restores/${part(requestId)}-after`,
 } as const;
 
-/** The play bot: the measuring instrument the skilled fact plays with. */
-const BOT_DIR = ".studio/bot";
-
 /**
- * What a restore brings back, and so what a build is: the engine project and
- * the art sources with their map, so built assets and the .blend files they
- * came from stay together, and the play bot, so an undo is exactly as before
- * and a build's skilled fact is measured with the bot it was made with. Notes,
- * plans and the rest of `.studio` stay as they are, and ignored engine caches
- * are never touched.
+ * What a restore brings back, and so what a build is: the engine project and the art sources
+ * with their map, so built assets and the .blend files they came from stay together. Notes,
+ * plans and the rest of `.studio` stay as they are, and ignored engine caches are never touched.
  */
-export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md", "STYLE.json", BOT_DIR];
-
-/**
- * Inside `restoredPaths` but never restored: the bot kits Kurambit writes from
- * its own templates. A new run refreshes the game's kit, which must not read
- * as the folder edited, and the harness's kit exists only in measuring copies.
- */
-export const unrestoredPaths = [`${BOT_DIR}/kit`, `${BOT_DIR}/harness-kit`];
+export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md", "STYLE.json"];

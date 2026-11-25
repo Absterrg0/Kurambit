@@ -338,7 +338,7 @@ export class GameBuilds extends Context.Service<
       build: GameBuildRef,
     ) => Effect.Effect<void, GameOperationError>;
     /**
-     * Puts the build's engine project, art, ASSETS.md and play bot back in the game
+     * Puts the build's engine project, art and ASSETS.md back in the game
      * folder, keeping the folder before as a build. With `expect`, inside the
      * game lock, only when the folder still holds that build and is unedited;
      * else it is refused "moved-on" and nothing moves (keep going's undo).
@@ -388,7 +388,7 @@ export class GameBuilds extends Context.Service<
     ) => Effect.Effect<GameBuildUndoResult, GameOperationError>;
     /**
      * The folder's current build (currentBuild), and whether its engine
-     * project, art, ASSETS.md and play bot are no longer that build's, read under the
+     * project, art and ASSETS.md are no longer that build's, read under the
      * game's lock.
      */
     readonly current: (
@@ -2391,7 +2391,7 @@ const make = Effect.gen(function* () {
 
   // A game with no run restores through the same moves as the run's restore:
   // the folder parked first as a build of its own, the build's engine project,
-  // art, ASSETS.md and play bot brought back, and the result checked against the build.
+  // art and ASSETS.md brought back, and the result checked against the build.
   // The record is written before the folder moves; the moves are safe to run
   // again with the same request (the park is found, never retaken), so a
   // restart settles any restore it cut short (settleRestores).
@@ -2444,7 +2444,7 @@ const make = Effect.gen(function* () {
       const parked = parks.findIndex((each) => each.checkpointRef === beforeRef);
       const before = parked === -1 ? null : parks[parked]!.oid;
       const parkedAt = parked === -1 ? null : isoOfSeconds(parks[parked]!.committedAt);
-      const what = `${lane}/, art/, ASSETS.md and play bot`;
+      const what = `${lane}/, art/ and ASSETS.md`;
       // A folder that was exactly a build already (an Undo, a Redo) needs no
       // park of its own: that build is what undoes this restore.
       const same =

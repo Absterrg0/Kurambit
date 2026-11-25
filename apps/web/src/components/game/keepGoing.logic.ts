@@ -179,8 +179,6 @@ export type KeepGoingBannerView =
       readonly line: string;
       /** What it is doing now, in full, for the line's tooltip. */
       readonly title: string;
-      /** Why keep going wrote no play bot, through its first step; else null. */
-      readonly note: string | null;
     }
   | {
       readonly kind: "paused";
@@ -212,11 +210,6 @@ export const keepGoingBannerView = (
   }
   const n = status.step;
   const proposal = status.proposal;
-  // Said once: through the run's first step, then the run goes on without it.
-  const note =
-    status.botSetup?.state === "skipped" && (n === null || n <= 1)
-      ? `No play bot: ${status.botSetup.reason}`
-      : null;
   if (proposal !== null && (status.phase === "proposed" || status.phase === "held")) {
     const held = proposal.deadline === null;
     return {
@@ -229,10 +222,7 @@ export const keepGoingBannerView = (
       line: proposal.summary,
       text: proposal.text,
       // When, on the row; why is in the row's tooltip, since the action mostly says it.
-      detail: [
-        proposal.deadline === null ? "waits for you" : `at ${clock(proposal.deadline)}`,
-        ...(note === null ? [] : [note]),
-      ].join(" · "),
+      detail: proposal.deadline === null ? "waits for you" : `at ${clock(proposal.deadline)}`,
       why: stepWhyLabel(proposal.why),
       held,
     };
@@ -240,24 +230,22 @@ export const keepGoingBannerView = (
   const step = n === null ? "Keep going" : `Keep going · step ${n}`;
   const reason = status.steps.find((entry) => entry.n === n)?.reason ?? "";
   const title =
-    status.botSetup?.state === "running"
-      ? "Keep going · Kurambit is writing its play bot, outside your budget"
-      : status.phase === "waiting"
-        ? `Keep going · waits for this turn to end${status.endsAt === null ? "" : ` · until ${clock(status.endsAt)}`}`
-        : status.phase === "turn"
-          ? `${step} · your agent is working on it`
-          : status.phase === "measuring"
-            ? `${step} · measuring the build before keeping it`
-            : status.phase === "undoing"
-              ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
-              : "Keep going · reading the current build's checks";
+    status.phase === "waiting"
+      ? `Keep going · waits for this turn to end${status.endsAt === null ? "" : ` · until ${clock(status.endsAt)}`}`
+      : status.phase === "turn"
+        ? `${step} · your agent is working on it`
+        : status.phase === "measuring"
+          ? `${step} · measuring the build before keeping it`
+          : status.phase === "undoing"
+            ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
+            : "Keep going · reading the current build's checks";
   const line =
     n === null
       ? "Keep going"
       : status.phase === "undoing"
         ? `Keep going · undoing step ${n}`
         : step;
-  return { kind: "live", id: `keep-going:${runId}`, line, title, note };
+  return { kind: "live", id: `keep-going:${runId}`, line, title };
 };
 
 /**

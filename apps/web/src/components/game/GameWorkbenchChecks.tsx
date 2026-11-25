@@ -387,7 +387,6 @@ function BuildHeader({
 const FACT_KEYS = [
   "boots",
   "masher",
-  "skilled",
   "performance",
   "use",
   "qa",
@@ -788,8 +787,6 @@ const hasProof = (facts: GameBuildFacts, check: GameCheck, rooted: boolean): boo
     // The harness's play is the one the errors were watched in.
     case "errors":
       return rooted && hasLastPlay(facts);
-    case "skilled":
-      return facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "";
     case "saved-plays":
       return facts.savedPlays.status === "measured" && facts.savedPlays.value.plays.length > 0;
     default:
@@ -904,17 +901,6 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
           <SavedPlays threadRef={threadRef} facts={facts} />
         </EvidenceBlock>
       );
-    case "skilled":
-      return (
-        <EvidenceBlock>
-          {facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "" ? (
-            <Text variant="meta" tone="default" render={<p />}>
-              {facts.skilled.value.note}
-            </Text>
-          ) : null}
-          {recordings}
-        </EvidenceBlock>
-      );
     case "errors":
       return (
         <EvidenceBlock>
@@ -944,7 +930,7 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
 
 /** What the plays threw: the play that broke, then each error a control's press threw. */
 const errorLines = (facts: GameBuildFacts): ReadonlyArray<string> => {
-  const broke = [facts.masher, facts.skilled].flatMap((tier) =>
+  const broke = [facts.masher].flatMap((tier) =>
     tier.status === "measured" &&
     (tier.value.ending === "crashed" || tier.value.ending === "unresponsive") &&
     tier.value.note.trim() !== ""

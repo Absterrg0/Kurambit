@@ -41,7 +41,6 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
     status: "measured",
     value: { ending: "lost", at: 20, played: 60, note: "", evidence: null },
   },
-  skilled: { status: "not-measured", why: "no play-mode bot", retry: false },
   use: { status: "not-measured", why: "not played", retry: false },
   performance: { status: "not-measured", why: "not played", retry: false },
   qa: { status: "not-measured", why: "not played", retry: false },
@@ -161,7 +160,6 @@ const look = (patch: Partial<Extract<GameRunStepResult, { kind: "look" }>> = {})
     current: BASE,
     facts: facts(),
     next: { text: "Add a score counter." },
-    bot: true,
     edited: false,
     ...patch,
   }) as const;

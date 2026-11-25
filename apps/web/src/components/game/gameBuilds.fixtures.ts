@@ -226,12 +226,12 @@ export const FAKE_DELTAS: ReadonlyArray<GameFactDelta> = [
     why: null,
   },
   {
-    id: "skilled",
-    label: "Skilled",
+    id: "saved-plays",
+    label: "Saved plays",
     a: null,
-    b: "Won at 50 s",
+    b: "1 plays the same",
     change: "not-comparable",
     tone: "neutral",
-    why: "this game has no skilled bot",
+    why: "the saved plays changed between the two measurements",
   },
 ];

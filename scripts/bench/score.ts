@@ -115,18 +115,14 @@ const bootsVerdict = (facts: GameBuildFacts): Verdict =>
     : notMeasured(facts.boots.status === "pending" ? "still measuring" : facts.boots.why);
 
 const endingVerdict = (facts: GameBuildFacts): Verdict => {
-  const tiers: ReadonlyArray<readonly [string, Tier]> = [
-    ["random input", facts.masher],
-    ["tester's bot", facts.skilled],
-  ];
+  const tiers: ReadonlyArray<readonly [string, Tier]> = [["random input", facts.masher]];
   const measured = tiers.flatMap(([who, tier]) =>
     tier.status === "measured" ? [{ who, tier: tier.value }] : [],
   );
   if (measured.length === 0) return notMeasured("no play tier was measured");
   // Only the two plays with no skill can show a game ending by itself.
   const instant = measured.find(
-    ({ who, tier }) =>
-      who !== "tester's bot" &&
+    ({ tier }) =>
       (tier.ending === "won" || tier.ending === "lost") &&
       tier.at !== null &&
       tier.at < THRESHOLDS.instantEndSeconds,
@@ -138,11 +134,9 @@ const endingVerdict = (facts: GameBuildFacts): Verdict => {
   );
   if (broke) return fail(`${broke.who}: ${broke.tier.ending}`);
   const ended = measured.find(({ tier }) => tier.ending === "won" || tier.ending === "lost");
-  // "Never ends" needs both plays with no skill: one not measured (too slow for its
-  // budget on this machine) might have ended, so it is not a fail of the game.
-  const unplayed = tiers.find(
-    ([who, tier]) => who !== "tester's bot" && tier.status !== "measured",
-  );
+  // "Never ends" needs the play measured: one not measured (too slow for its budget on this
+  // machine) might have ended, so it is not a fail of the game.
+  const unplayed = tiers.find(([, tier]) => tier.status !== "measured");
   if (ended === undefined && unplayed !== undefined)
     return notMeasured(
       `no measured play reached an ending, and ${unplayed[0]} was not measured${unplayed[1].status === "not-measured" ? `: ${unplayed[1].why}` : ""}`,

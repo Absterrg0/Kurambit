@@ -17,7 +17,6 @@ import {
 } from "@kurambit/contracts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
-import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import * as GameCopies from "../../../game/GameCopies.ts";
 import * as GameFreshEyes from "../../../game/GameFreshEyes.ts";
@@ -74,7 +73,6 @@ export const GamePlayTool = Tool.make("game_play", {
   ...answers,
   dependencies: [
     GameExplore.GameExplore,
-    GameBot.GameBot,
     GamePlays.GamePlays,
     GameEngine.GameEngine,
     GameProjectService.GameProjectService,

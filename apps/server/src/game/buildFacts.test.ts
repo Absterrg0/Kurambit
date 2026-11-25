@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { GameOperationError, type GameBotRunResult } from "@kurambit/contracts";
 
-import { faultOf, skilledFact, tierFact, turnChangeBase } from "./buildFacts.ts";
+import { faultOf, tierFact, turnChangeBase } from "./buildFacts.ts";
 
 const run = (
   state: string,
@@ -64,15 +64,13 @@ describe("tierFact", () => {
 });
 
 describe("budget", () => {
-  it("is a standing not-measured, never an ending, for the tiers and the skilled bot", () => {
+  it("is a standing not-measured, never an ending", () => {
     const slow = { ...run("budget", { state: "playing" }), timeRatio: 0.4 };
     expect(tierFact(slow, 60, null)).toMatchObject({
       status: "not-measured",
       retry: false,
       standing: true,
     });
-    const bot = { file: ".studio/bot/win.mjs", hash: "h" } as const;
-    expect(skilledFact(slow, bot, null)).toMatchObject({ status: "not-measured", retry: false });
   });
 
   it("is the machine's, retried, when the machine was busy during the play", () => {
@@ -99,8 +97,6 @@ describe("budget", () => {
       status: "not-measured",
       why: expect.stringContaining("the harness renders in software here"),
     });
-    const bot = { file: ".studio/bot/win.mjs", hash: "h" } as const;
-    expect(skilledFact(slow, bot, null, busy)).toMatchObject({ retry: true });
   });
 });
 
@@ -126,16 +122,6 @@ describe("faultOf", () => {
     expect(faultOf(error("low-memory"))).toMatchObject({ retry: true });
     expect(faultOf(error("tool-missing"))).toMatchObject({ retry: false });
     expect(faultOf(error("command-failed"))).toBeNull();
-  });
-});
-
-describe("skilledFact", () => {
-  it("keeps the bot's own word beside an unended game and never reads it as a win", () => {
-    const bot = { file: ".studio/bot/win.mjs", hash: "h" } as const;
-    expect(skilledFact(run("done", { state: "playing" }), bot, null)).toMatchObject({
-      status: "measured",
-      value: { ending: "no-ending", botWord: "done" },
-    });
   });
 });
 

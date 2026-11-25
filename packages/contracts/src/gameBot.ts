@@ -1,39 +1,24 @@
 import * as Schema from "effect/Schema";
-import { GameSaves } from "./gameExplore.ts";
 
 /**
- * Real-time written-bot playtesting behind the GameBot service. A bot is a
- * game file under `.studio/bot/*.mjs` (goal, observe, options, status, an
- * optional policy); the service runs the real game at normal speed on a
- * private display, drives it through the bot's inputs at 10 Hz, records one
- * continuous video, and reports detectors findings with time and position.
+ * The harness's stepped bot runs behind the GameBot service: a bot file under the checkout's
+ * `.studio/bot/` played inside the game's page on the run's own clock (the random-input masher
+ * a build's facts are measured with).
  */
 
 export const GAME_BOT_BOUNDS = {
-  /** Default wall budget for one run. */
+  /** Default game seconds for one run. */
   defaultSeconds: 120,
-  /** Shortest and longest wall budget one run may take. */
+  /** Fewest and most game seconds one run may take. */
   minSeconds: 10,
   maxSeconds: 600,
-  /** Nominal controller tick: holds and releases go out at 10 Hz. */
-  tickMs: 100,
-  /** Findings kept in one run result; detectors dedupe by signature. */
-  maxFindings: 40,
-  /** Frames extracted from the run video for the result. */
-  maxFrames: 8,
-  /** Recent bot runs remembered per game for game_play op bot_view. */
-  maxRuns: 20,
 } as const;
 
 export const GameBotRunInput = Schema.Struct({
-  /** Bot file relative to the game root, under `.studio/bot/`, ending `.mjs`. */
+  /** Bot file relative to the checkout's root, under `.studio/bot/`, ending `.mjs`. */
   file: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
-  /** Wall budget in seconds. Omitted means the default. */
+  /** Game seconds the run may play. Omitted means the default. */
   seconds: Schema.optionalKey(Schema.Number),
-  /** How many sequential runs this call makes (1–10, default 1). */
-  runs: Schema.optionalKey(Schema.Int),
-  /** Omitted means `fresh`; `keep` carries saved data across runs and sessions. */
-  saves: Schema.optionalKey(GameSaves),
 });
 export type GameBotRunInput = typeof GameBotRunInput.Type;
 
@@ -67,13 +52,12 @@ export type GameBotStatus = typeof GameBotStatus.Type;
  * nodes (out of the tree, never freed) at the end. Counts, not timings, so
  * they do not depend on the machine's load.
  */
-export const GameBotPerf = Schema.Struct({
+const GameBotPerf = Schema.Struct({
   nodesStart: Schema.Int,
   nodesPeak: Schema.Int,
   nodesEnd: Schema.Int,
   orphansEnd: Schema.Int,
 });
-export type GameBotPerf = typeof GameBotPerf.Type;
 
 export const GameBotRunResult = Schema.Struct({
   runId: Schema.String,
@@ -111,28 +95,3 @@ export const GameBotRunResult = Schema.Struct({
   message: Schema.String,
 });
 export type GameBotRunResult = typeof GameBotRunResult.Type;
-
-export const GameBotViewInput = Schema.Struct({
-  runId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
-});
-export type GameBotViewInput = typeof GameBotViewInput.Type;
-export const GameBotViewResult = Schema.Struct({
-  runId: Schema.String,
-  goal: Schema.String,
-  status: GameBotStatus,
-  ticks: Schema.Int,
-  tickHz: Schema.Number,
-  timeRatio: Schema.Number,
-  decisions: Schema.Int,
-  usedSetState: Schema.Boolean,
-  /** State writes the game refused, with its reason; absent when none was. */
-  refusedStates: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ target: Schema.String, error: Schema.String })),
-  ),
-  findings: Schema.Array(GameBotFinding),
-  tracePath: Schema.String,
-  videoPath: Schema.String,
-  frames: Schema.Array(Schema.String),
-  message: Schema.String,
-});
-export type GameBotViewResult = typeof GameBotViewResult.Type;

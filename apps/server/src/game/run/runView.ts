@@ -2,7 +2,6 @@
 // the banner and game_keep_going share, the game card's line, and the
 // one plain sentence for each way it stops.
 import {
-  type GameKeepGoingBotSetup,
   type GameKeepGoingPhase,
   type GameKeepGoingStatus,
   type GameKeepGoingStepRef,
@@ -114,8 +113,6 @@ export interface StatusInput {
   /** While undoing: what the step made worse (loop.undoReason). */
   readonly undoing: string | null;
   readonly blocked: string | null;
-  /** The play bot an earlier Kurambit's run wrote as setup; null for every run since. */
-  readonly botSetup: GameKeepGoingBotSetup | null;
 }
 
 export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
@@ -141,7 +138,6 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       blocked: input.blocked,
       message: "Keep going is off.",
     };
-  const botSetup = input.botSetup === null ? {} : { botSetup: input.botSetup };
   const live = run.status !== "ended";
   const phase = live ? phaseOf(inFlight) : null;
   const n = phase === null || phase === "waiting" || phase === "looking" ? null : input.n;
@@ -216,6 +212,5 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
     resumable: !live && run.ending !== null && RESUMABLE.has(run.ending),
     blocked: input.blocked,
     message,
-    ...botSetup,
   };
 };

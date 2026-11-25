@@ -321,38 +321,28 @@ check that matters.
 
 ## Play sessions
 
-Exploration and bots are clients of one play-session protocol
+Exploration and the harness's plays are clients of one play-session protocol
 ([gamePlaySession.ts](../../packages/contracts/src/gamePlaySession.ts)), versioned, so neither
 knows which engine runs the game. A session opens held: the runner says hello with its
-capabilities, plays discrete acts with the game paused between them (exploration), and after
-`realtime` lets the game run for good while held keys, taps and clicks stream in and one tick
-observation goes out every 100 ms (bots). The policy that plays, the detectors, the video and the
-reports are shared; an engine adds only how a session launches. Every wait a session makes has a
-bound (`PLAY_BOUNDS` in [playSession.ts](../../apps/server/src/game/playSession.ts)), including
-every call into a web page, and its end says by whose side: a game that exits, crashes or stops
-answering is evidence about the build (a bot run ends `crashed` or `unresponsive` with its trace
-and video), while our display or browser going away is a tool fault. A tick's `t` is the game's
-own clock on every engine: it stops while the game pauses itself (a page sums its frames'
-clamped deltas).
+capabilities and plays discrete acts with the game paused between them (exploration); the page's
+own runs (the QA play, replays, the stepped masher) play on the run's own clock inside it. An
+engine adds only how a session launches. Every wait a session makes has a bound (`PLAY_BOUNDS` in
+[playSession.ts](../../apps/server/src/game/playSession.ts)), including every call into a web
+page, and its end says by whose side: a game that exits, crashes or stops answering is evidence
+about the build (a run ends `crashed` or `unresponsive` with its trace), while our display or
+browser going away is a tool fault.
 
 - three.js has no runner process. The browser host speaks the protocol to the page through the
   shell's `window.__studio` bridge, which the game owns and may have edited, so the protocol stays in
-  the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
-  id-clicks are skipped and counted.
+  the server instead of the page. Pages read no control tree: no ui or inspect steps.
 - A page's acts hold the shell's harness clock (`holdClock`, the QA play's clock too): input goes
   in as real browser events, and each wait or hold steps the game by its game time as fast as the
   page allows (`advanceClock`), never in real time, so a page drawing at 2 fps in software plays the
   same act, only sooner. A shell without the clock plays the act in real time.
 
-Pictures and video belong to the engine, never the OS: from protocol 2 a bot run asks `realtime`
-for frames, which the browser host streams from the CDP screencast. Each frame carries the
-engine's own drawn-frame counter. [frameVideo.ts](../../apps/server/src/game/frameVideo.ts) pipes
-them into one ffmpeg on a wall-clock grid, repeating the last picture in a slot with no new one, so
-a game that draws slowly or stops looks exactly like that, and writes `run.frames.json` beside the
-video with each frame's counter, game time and arrival (the evidence route is `engine-frames`). The
-run's end frame is the session's own `still`. A native engine would add a process runner speaking
-the same protocol over a loopback socket; earlier versions had one for Godot and Unity, and git
-history keeps it.
+Pictures belong to the engine, never the OS: a run's end frame is the session's own `still`. A
+native engine would add a process runner speaking the same protocol over a loopback socket;
+earlier versions had one for Godot and Unity, and git history keeps it.
 
 The person's own play depends on how the engine is staged (`GAME_ENGINES[engine].stage`). A
 `live` engine (three.js) is played from its folder: `GamePreview.live`
@@ -551,8 +541,8 @@ hand has no stamp, so only fresh sessions read it.
   person's measure, then a chat turn's, then the rest, first asked within each. A holder that a waiter outranks is interrupted at once and runs
   again from its row on its next turn, so a half-played tier is never a fact, and the waiter
   waits only for that teardown (a bot run's stop, bounded in GameBot) plus the holds of its own
-  rank ahead of it. An agent's `game_play` op `bot` and explore sessions are outside the lane, and
-  another program on the GPU is not visible to it.
+  rank ahead of it. An agent's explore sessions are outside the lane, and another program on the
+  GPU is not visible to it.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.
@@ -561,8 +551,7 @@ hand has no stamp, so only fresh sessions read it.
   reads meaning out of `why`, which is the agents' text and free to change.
 - **Facts skip what is already known or not needed.** The boot check is not run again when this
   server's own final `game_check` (op `final`, the one that also plays the scene report and the
-  QA play) booted the same bytes (engine folder and `game.json`) clean, and the play bot plays a
-  build only when asked (below).
+  QA play) booted the same bytes (engine folder and `game.json`) clean.
 - **A restore commits, then moves.** Undo, Redo, Go back and a landing commit their restore
   (`game-build.restore`; a landing's build in the same commit) and the folder's moves
   (`withBuildInFolder`, under the `game-builds` run-ref folder) run as that record's outbox
@@ -654,18 +643,12 @@ cannot both find none.
   back from or skipped from the game's decisions (`decidedKeys`), and passes over them the same
   way: a person's undone turn carries the `next:` key of its request, so the Next line it acted on
   is not proposed again.
-- **Every measure plays the game's own play bot.** Writing one cost 4 to 10 minutes between
-  steps, so no step writes one: the agent writes `.studio/bot/play.mjs` with the bot kit when the
-  person asks it to prove the game can be won. Once it exists, every build's measure plays it
-  (after its other plays, so keep going's judge never waits on it), which costs no model call; deferring it to an ask
-  left every bench game's facts incomplete within its cap. The skilled fact is not watched by
-  keep going, so its one real-time run never proposes or undoes a step. With no bot it reads not
-  measured (`no-play-bot`). A build whose own code never calls `.win(` reads `no-win` before
-  any bot is looked for (`gameCanWin` on the measured copy): like `no-saved-plays`, no surface shows,
-  compares or counts it. Only the code decides that, so one bot play that found no ending never
-  hides the check. `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own bot. Games
-  from earlier runs keep their `game-builds/bots/<run>` setup points, which list as the build they
-  were written on.
+- **No play bot.** Kurambit measures with its own stepped masher and the person's saved test plays;
+  agents write no bots. A bot cost minutes of a model's time per game, and one real-time run said
+  little that the masher and a saved winning run do not. `.studio` is outside `restoredPaths`, so
+  the `.studio/bot` an earlier Kurambit wrote stays as it is through an undo. Games from earlier
+  runs keep their `game-builds/bots/<run>` setup points, which list as the build they were written
+  on.
 - **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
   start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
   (superseded, stopped) gives them back ahead of newer notes. A note only ever appends, so Slice 2

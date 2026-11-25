@@ -30,8 +30,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   GAME_FACTS_BOUNDS,
   GAME_FACTS_EVENT,
-  GAME_FACTS_NO_PLAY_BOT,
-  GAME_FACTS_NO_WIN,
   GameAssetUse,
   GameBuildFacts,
   GameBuildId,
@@ -51,7 +49,6 @@ import {
   manifestProject,
   manifestRuntime,
   noSavedPlays,
-  noWin,
   SAVED_PLAYS_PER_BUILD,
 } from "@kurambit/contracts";
 import {
@@ -61,9 +58,7 @@ import {
   machineBusy,
   type MachineLoad,
   notMeasured,
-  skilledFact,
   tierFact,
-  tierWallSeconds,
   qaFact,
   screensFact,
   playerFact,
@@ -76,18 +71,15 @@ import { type LaneTicket, type PlayPriority, playLane } from "./playLane.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import { insideGame } from "./gamePath.ts";
-import { copyTree } from "./gameFiles.ts";
-import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameTemplates from "./GameTemplates.ts";
-import { gameCanWin, runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
+import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
 import { assetUseOf, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
 import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
 /**
- * Changes when the server's reading of a measurement, or how templates/bot-child.mjs plays a
- * bot, changes; the masher's file is hashed besides.
+ * Changes when the server's reading of a measurement changes; the masher's file is hashed besides.
  * A new tier needs no bump: planOf measures each fact a stored row lacks, and nothing else.
  */
 const FACTS_VERSION = 5;
@@ -97,7 +89,7 @@ const OWNER = "game-facts:measure";
 const QUEUE_LIMIT = 3;
 /** The harness's random-input bot, a stepped one (templates/bot-kit/masher.mjs). */
 const MASHER = "masher.mjs";
-/** Where a copy holds the harness's own masher, apart from the game's kit its bot imports. */
+/** Where a copy holds the harness's own masher. */
 const HARNESS_KIT = ".studio/bot/harness-kit";
 
 /** How long a tier waits for a busy machine to calm before it plays anyway, as the memory gate waits for memory. */
@@ -163,7 +155,6 @@ const Stored = Schema.Struct({
   runtime: Schema.optionalKey(Schema.String),
   boots: Schema.optionalKey(GameBuildFacts.fields.boots),
   masher: Schema.optionalKey(GameBuildFacts.fields.masher),
-  skilled: Schema.optionalKey(GameBuildFacts.fields.skilled),
   use: Schema.optionalKey(
     Schema.Union([
       Schema.Struct({ status: Schema.Literal("measured"), value: GameAssetUse }),
@@ -210,7 +201,6 @@ const Stored = Schema.Struct({
   plays: Schema.optionalKey(
     Schema.Struct({
       masher: Schema.optionalKey(PlayUse),
-      skilled: Schema.optionalKey(PlayUse),
     }),
   ),
   /** The facts not measured for a standing tool or machine fault: a person's measure tries them again. */
@@ -226,16 +216,13 @@ const decodeCopyManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameMa
 
 /**
  * The facts a tier's run writes: only what a person acts on. The boot check (with the QA play),
- * the game's saved plays replayed, then the random-input play (errors, freezes, frame rate),
- * and the play bot only when someone asks to prove the game can be won. use is every play's
- * together: each play tier writes it again with its own record added (the generation cards
- * read it).
+ * the game's saved plays replayed, then the random-input play (errors, freezes, frame rate).
+ * use is that play's record against what the build ships (the generation cards read it).
  */
-type Tier = "boots" | "replays" | "masher" | "skilled";
+type Tier = "boots" | "replays" | "masher";
 type FactName =
   | "boots"
   | "masher"
-  | "skilled"
   | "use"
   | "performance"
   | "qa"
@@ -248,9 +235,8 @@ const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   boots: ["boots", "qa", "screens", "player"],
   replays: ["savedPlays"],
   masher: ["masher", "performance", "use"],
-  skilled: ["skilled", "use"],
 };
-const TIERS: ReadonlyArray<Tier> = ["boots", "replays", "masher", "skilled"];
+const TIERS: ReadonlyArray<Tier> = ["boots", "replays", "masher"];
 /**
  * A build no saved play was replayed on: the game had none (or none when it was measured, or
  * it plays outside a browser, where no play is recorded). The fact is then not shown.
@@ -295,7 +281,6 @@ const TIER_STEP: Readonly<Record<Tier, string>> = {
   boots: "checking it starts",
   replays: "replaying the saved plays",
   masher: "playing it with random input",
-  skilled: "letting the play bot play it",
 };
 
 /** What a running measure is doing, by the step it is on and how many are done: never a time left. */
@@ -348,7 +333,7 @@ export class GameFacts extends Context.Service<
     ) => Effect.Effect<ReadonlyMap<string, GameBuildFacts>>;
     /**
      * Measures what the build lacks (never measured, not measured with a
-     * reason waiting clears, an older harness, a changed play bot; a
+     * reason waiting clears, an older harness; a
      * person's also what a standing fault kept) and returns at once, or after
      * `waitFor` if it finishes sooner. Measures go by who asked: a person's,
      * then a chat turn's (`supersede`), then the rest, and past its boot check
@@ -399,8 +384,8 @@ const make = Effect.gen(function* () {
   // Facts are comparable only when the same bots and bounds measured them.
   const harness = yield* Effect.promise(async () => {
     const hash = NodeCrypto.createHash("sha256");
-    const { masherSeconds, skilledSeconds, startSeconds } = GAME_FACTS_BOUNDS;
-    hash.update(`${FACTS_VERSION}\0${masherSeconds},${skilledSeconds},${startSeconds}\0`);
+    const { masherSeconds, startSeconds } = GAME_FACTS_BOUNDS;
+    hash.update(`${FACTS_VERSION}\0${masherSeconds},${startSeconds}\0`);
     hash.update(await NodeFSP.readFile(masher).catch(() => Buffer.from(MASHER)));
     return hash.digest("hex").slice(0, 12);
   });
@@ -454,7 +439,6 @@ const make = Effect.gen(function* () {
     const facts = {
       boots: get("boots"),
       masher: get("masher"),
-      skilled: get("skilled"),
       use: useNotMeasured(build.engine) ?? get("use"),
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
       qa: browserOnly(build.engine, "qa") ?? get("qa"),
@@ -473,11 +457,10 @@ const make = Effect.gen(function* () {
             : (stored?.savedPlays ?? NONE_SAVED),
     };
     // An engine with no asset use or performance is not an incomplete measurement, nor is a
-    // game with no saved plays or no ending to win.
+    // game with no saved plays.
     const counted = Object.entries(facts).flatMap(([name, fact]) =>
       (useNotMeasured(build.engine) !== null && BROWSER_ONLY.has(name as FactName)) ||
-      (name === "savedPlays" && noSavedPlays(facts)) ||
-      (name === "skilled" && noWin(facts))
+      (name === "savedPlays" && noSavedPlays(facts))
         ? []
         : [fact],
     );
@@ -531,9 +514,7 @@ const make = Effect.gen(function* () {
           () => true,
           () => false,
         );
-      const tier = async <F extends GameBuildFacts["masher"] | GameBuildFacts["skilled"]>(
-        fact: F,
-      ): Promise<F> =>
+      const tier = async <F extends GameBuildFacts["masher"]>(fact: F): Promise<F> =>
         fact.status !== "measured" ||
         fact.value.evidence === null ||
         (await exists(fact.value.evidence))
@@ -550,7 +531,6 @@ const make = Effect.gen(function* () {
       return {
         ...facts,
         masher: await tier(facts.masher),
-        skilled: await tier(facts.skilled),
         screens:
           screens.status !== "measured"
             ? screens
@@ -607,29 +587,11 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  // The latest play bot on this game, with the hash of its file now.
-  const currentBot = (root: string) =>
-    Effect.gen(function* () {
-      const latest = yield* bots.latestPlayBot(root);
-      if (latest === null) return null;
-      const text = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(root, latest.file)).catch(() => null),
-      );
-      if (text === null) return null;
-      return {
-        file: latest.file,
-        hash: NodeCrypto.createHash("sha256").update(text).digest("hex").slice(0, 16),
-      };
-    });
-
   // What a measurement must do: everything under a new harness, else each
   // tier never measured or not measured for a reason waiting clears (and,
-  // for a person, a standing fault they may have fixed), and the skilled
-  // tier again when the play bot changed. A row an earlier Kurambit wrote with
-  // the play deferred is not measured, so its bot plays now.
+  // for a person, a standing fault they may have fixed).
   const planOf = (
     found: Found | null,
-    bot: { readonly hash: string } | null,
     person: boolean,
     engine: GameEngineName,
     runtime: string | null,
@@ -669,14 +631,6 @@ const make = Effect.gen(function* () {
       (replayedSet === null ? needs("savedPlays") : replayedSet !== savedSet)
     )
       tiers.add("replays");
-    const skilled = stored.skilled;
-    const botChanged =
-      bot === null
-        ? skilled?.status === "measured"
-        : skilled?.status !== "measured" || skilled.value.bot.hash !== bot.hash;
-    // Read from these very files, which no bot changes: there is no ending to play for.
-    const cannotWin = skilled?.status === "not-measured" && skilled.cause === "no-win";
-    if (botChanged && !cannotWin) tiers.add("skilled");
     return tiers;
   };
 
@@ -711,14 +665,6 @@ const make = Effect.gen(function* () {
         (project) =>
           project || (isAvailableEngine(engine) ? engineProfile(engine).projectDirectory : ""),
       ),
-    );
-
-  /** Whether the build's own code ends a run with a win; a copy that cannot say keeps the check. */
-  const canWinOf = (copy: string) =>
-    Effect.promise(() =>
-      NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
-        .then((text) => gameCanWin(copy, decodeCopyManifest(text)))
-        .catch(() => true),
     );
 
   /** The runtime the copy's plays load now, for a game that loads one (gameRuntime.ts). */
@@ -764,21 +710,6 @@ const make = Effect.gen(function* () {
           );
           return { ...fact, value: { ...fact.value, sizes } };
         });
-
-  /** The win an older harness measured on these files with this bot, on the same runtime. */
-  const wonBefore = (
-    found: Found | null,
-    stored: Found["stored"],
-    bot: { readonly hash: string },
-  ) => {
-    const before = found !== null && found.harness !== harness ? found.stored : null;
-    return before?.skilled?.status === "measured" &&
-      before.skilled.value.ending === "won" &&
-      before.skilled.value.bot.hash === bot.hash &&
-      (before.runtime === undefined || before.runtime === stored.runtime)
-      ? before.skilled
-      : null;
-  };
 
   const measureJob = (
     build: ResolvedBuild,
@@ -972,22 +903,14 @@ const make = Effect.gen(function* () {
               evidence: null,
             },
           }) as const;
-        // Asset use after each play tier: every play's record so far, against what the build
-        // ships. A browser engine only; the view says why the others have none.
-        const useAfter = (
-          play: "masher" | "skilled",
-          evidence: string | null,
-          none: ReturnType<typeof notMeasured>,
-        ) =>
+        // Asset use after the random-input play: its record against what the build ships. A
+        // browser engine only; the view says why the others have none.
+        const useAfter = (evidence: string | null, none: ReturnType<typeof notMeasured>) =>
           Effect.gen(function* () {
             if (useNotMeasured(build.engine) !== null) return {};
             const record =
               evidence === null ? null : yield* Effect.promise(() => readPlayUse(root, evidence));
-            const plays: { [K in "masher" | "skilled"]?: PlayUse } = {};
-            for (const each of ["masher", "skilled"] as const) {
-              const kept = each === play ? record : stored.plays?.[each];
-              if (kept !== null && kept !== undefined) plays[each] = kept;
-            }
+            const plays: { masher?: PlayUse } = record === null ? {} : { masher: record };
             stored = { ...stored, plays };
             const recorded = Object.values(plays);
             if (recorded.length === 0) return { use: none };
@@ -1002,8 +925,8 @@ const make = Effect.gen(function* () {
               },
             };
           });
-        // Why a build has no use when no play left a record: the plays' own reason.
-        const noRecord = (fact: Fact<"masher"> | Fact<"skilled">) =>
+        // Why a build has no use when no play left a record: the play's own reason.
+        const noRecord = (fact: Fact<"masher">) =>
           fact.status === "not-measured"
             ? notMeasured(`its plays were not measured: ${fact.why}`, fact.retry, false, fact.cause)
             : fact.status === "measured" && fact.value.ending === "did-not-boot"
@@ -1017,7 +940,7 @@ const make = Effect.gen(function* () {
               ...(browserOnly(build.engine, "performance") === null
                 ? { performance: blocked }
                 : {}),
-              ...(yield* useAfter("masher", null, blocked)),
+              ...(yield* useAfter(null, blocked)),
             });
           else {
             const playSeconds = GAME_FACTS_BOUNDS.masherSeconds;
@@ -1084,74 +1007,7 @@ const make = Effect.gen(function* () {
             yield* write({
               masher: run.fact,
               ...performance,
-              ...(yield* useAfter("masher", run.evidence, noRecord(run.fact))),
-            });
-          }
-        }
-
-        if (tiers.has("skilled")) {
-          const bot = yield* currentBot(root);
-          if (!(yield* canWinOf(copy))) {
-            // Before any bot: a game with no ending has none to prove, with or without one.
-            const skilled = notMeasured(GAME_FACTS_NO_WIN, false, false, "no-win");
-            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
-            yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
-          } else if (blocked !== null)
-            yield* write({ skilled: blocked, ...(yield* useAfter("skilled", null, blocked)) });
-          else if (bot === null) {
-            const skilled = notMeasured(GAME_FACTS_NO_PLAY_BOT, false, false, "no-play-bot");
-            // No play ran: the other plays' reason stands when they left no record either.
-            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
-            yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
-          } else if (wonBefore(found, stored, bot) !== null) {
-            // A win stays proven through a new harness: these files and this bot won, and no
-            // change to how Kurambit measures unproves that. Anything short of a win plays again.
-            const won = wonBefore(found, stored, bot)!;
-            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(won);
-            yield* write({
-              skilled: won,
-              ...(yield* useAfter("skilled", won.value.evidence, why)),
-            });
-          } else {
-            // The game's own bot and its copy of the kit, beside the harness's kit.
-            // Links out of the game are left behind, so the copy never runs or reads what they point at.
-            const copied = yield* Effect.promise(async () => {
-              try {
-                await copyTree(
-                  insideGame(root, ".studio/bot"),
-                  NodePath.join(copy, ".studio", "bot"),
-                  undefined,
-                  // The harness's kit is its own: a game's file of that name never replaces it.
-                  (from) => isPathWithinRoot(from, NodePath.join(root, HARNESS_KIT)),
-                );
-                return true;
-              } catch {
-                return false;
-              }
-            });
-            let evidence: string | null = null;
-            const skilled = !copied
-              ? notMeasured("the game's bot files could not be copied", true)
-              : yield* runBot(bot.file, tierWallSeconds(GAME_FACTS_BOUNDS.skilledSeconds)).pipe(
-                  Effect.flatMap(({ value: result, machine }) =>
-                    Effect.map(moveEvidence(root, key, "skilled", result), (moved) => {
-                      evidence = moved;
-                      return skilledFact(result, bot, moved, machine);
-                    }),
-                  ),
-                  Effect.catchTags({
-                    GameOperationError: (error) =>
-                      Effect.succeed(
-                        faultOf(error) ?? {
-                          status: "measured" as const,
-                          value: { ...didNotBoot(error).value, bot, botWord: null },
-                        },
-                      ),
-                  }),
-                );
-            yield* write({
-              skilled,
-              ...(yield* useAfter("skilled", evidence, noRecord(skilled))),
+              ...(yield* useAfter(run.evidence, noRecord(run.fact))),
             });
           }
         }
@@ -1183,7 +1039,6 @@ const make = Effect.gen(function* () {
           const found = yield* load(build.key);
           const tiers = planOf(
             found,
-            yield* currentBot(build.root),
             job.person,
             build.engine,
             yield* runtimeOf(build.root, build.engine),
@@ -1266,7 +1121,6 @@ const make = Effect.gen(function* () {
           found === null ||
           planOf(
             found,
-            yield* currentBot(build.root),
             person,
             build.engine,
             yield* runtimeOf(build.root, build.engine),

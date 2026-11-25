@@ -60,7 +60,6 @@ export interface RunState {
   readonly superseded: number;
   readonly lastFailure: string;
   readonly ending: GameRunEnding | null;
-  readonly botSetup?: NonNullable<GameRun["botSetup"]>;
   /** This run's step records, oldest first. */
   readonly records: ReadonlyArray<StepRecord>;
   /** The number the chat's next step takes. */
@@ -107,7 +106,6 @@ const toState = (
   superseded: run.supersededStreak ?? 0,
   lastFailure: run.lastFailure,
   ending: run.ending,
-  ...(run.botSetup === undefined ? {} : { botSetup: run.botSetup }),
   records: rounds
     .filter((r) => r.runId === run.id)
     .map((r) => r.round)
@@ -127,7 +125,6 @@ const withState = (run: GameRun, state: RunState): GameRun => ({
   supersededStreak: state.superseded,
   lastFailure: state.lastFailure,
   ending: state.ending,
-  ...(state.botSetup === undefined ? {} : { botSetup: state.botSetup }),
 });
 
 type StepResult<K extends string> = Extract<GameRunStepResult, { readonly kind: K }>;

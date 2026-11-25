@@ -103,16 +103,6 @@ const VERDICTS: Readonly<Record<string, (answer: Answer) => Verdict>> = {
     line: `closed after ${answer.actions ?? 0} acts, ${num(answer.totalNominalMs)} ms of play`,
     said: ["message"],
   }),
-  "game_play.bot": (answer) => {
-    const play = answer.play as string | undefined;
-    return {
-      line: `${answer.status?.label ?? answer.status?.state ?? "ended"} · ${num(answer.gameSeconds, 1)} s of game in ${num(answer.wallSeconds, 1)} s${play === undefined ? "" : ` · play ${play}`}`,
-      findings: (answer.findings ?? []).map(
-        (finding: Answer) => `${finding.summary} (${num(finding.t, 1)} s)`,
-      ),
-      said: ["findings", "message"],
-    };
-  },
   "game_play.replay": (answer) =>
     answer.run !== undefined && answer.at !== undefined
       ? {

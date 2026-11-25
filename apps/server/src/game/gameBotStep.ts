@@ -3,8 +3,7 @@
 // page (shell studio.bot). The shell calls it each fixed step on the run's own clock, as fast as
 // the page allows, and records the run as it records a person's, so the run is a play: kept under
 // the bot run's own id, replayable to any moment and savable as a test play. Its ending is the
-// game's own (GameState.win/lose), never the bot's word. Bot files in the kit's format
-// (observe/options/status, run from a Node child in real time) keep the path in gameBotPlay.ts.
+// game's own (GameState.win/lose), never the bot's word.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Option from "effect/Option";
@@ -17,8 +16,11 @@ import {
   type GameBotRunResult,
 } from "@kurambit/contracts";
 import { boundEvidence, END_FRAME } from "./gameBotRuntime.ts";
-import type { BotLaunch } from "./gameBotPlay.ts";
+import type { PlayLaunch } from "./playLaunch.ts";
 import { botPlayTag, keepPlay } from "./playFiles.ts";
+
+/** What the launch hands the run: the session, how it ended, and how to end what it started. */
+export type BotLaunch = Pick<PlayLaunch, "play" | "stop" | "ended">;
 
 /** Whether a bot file is a stepped one: it exports `decide`. */
 export const isSteppedBot = (source: string) =>
@@ -101,17 +103,13 @@ export const playSteppedBot = async (
     status: { state: "bot-error", note },
     message: `Bot "${file}" did not play: ${note}`,
   });
-  if (play.stepBot === undefined)
-    return unplayed("this game's runner plays no stepped bots; write it in the kit's format.");
+  if (play.stepBot === undefined) return unplayed("this game's runner plays no stepped bots.");
   const raw = await play.stepBot(args.source, {
     seconds: args.seconds,
     wallMs: wallMsFor(args.seconds),
     ...(args.realTime === true ? { realTime: true } : {}),
   });
-  if (raw === "no-bot")
-    return unplayed(
-      "this game's runtime predates stepped bots (decide); write it in the kit's format (KIT-GUIDE.md).",
-    );
+  if (raw === "no-bot") return unplayed("this game's runtime predates stepped bots (decide).");
   const loadError =
     typeof raw === "object" && raw !== null && !("outcome" in raw) && "error" in raw
       ? String((raw as { error: unknown }).error)
@@ -204,6 +202,37 @@ export const playSteppedBot = async (
   await NodeFSP.writeFile(
     args.tracePath,
     JSON.stringify({ ...result, file, play: kept, wallSeconds }, null, 2),
+  );
+  return result;
+};
+
+/** A run whose game never booted: measured about the game, with a trace of its own. */
+export const runWithoutBoot = async (
+  args: Pick<SteppedBotArgs, "root" | "runId" | "botFile" | "tracePath">,
+  note: string,
+): Promise<GameBotRunResult> => {
+  const file = NodePath.relative(args.root, args.botFile);
+  const result: GameBotRunResult = {
+    runId: args.runId,
+    goal: "play the game",
+    status: { state: "not-booted", note },
+    ticks: 0,
+    tickHz: 0,
+    timeRatio: 0,
+    gameSeconds: 0,
+    decisions: 0,
+    usedSetState: false,
+    findings: [],
+    finalState: {},
+    finalPos: null,
+    runIds: [args.runId],
+    tracePath: args.tracePath,
+    videoPath: "",
+    frames: [],
+    message: `Bot "${file}": the game did not boot. ${note}`,
+  };
+  await NodeFSP.writeFile(args.tracePath, JSON.stringify({ ...result, file }, null, 2)).catch(
+    () => undefined,
   );
   return result;
 };

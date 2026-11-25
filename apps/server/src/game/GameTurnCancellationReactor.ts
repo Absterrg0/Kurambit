@@ -7,7 +7,6 @@ import * as Stream from "effect/Stream";
 
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { forkParked } from "../serverActivation.ts";
-import * as GameBot from "./GameBot.ts";
 import * as GameExplore from "./GameExplore.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -32,7 +31,6 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const operations = yield* GameOperations.GameOperations;
   const explore = yield* GameExplore.GameExplore;
-  const bots = yield* GameBot.GameBot;
 
   const cancelThread = Effect.fn("GameTurnCancellationReactor.cancelThread")(function* (
     threadId: ThreadId,
@@ -49,13 +47,11 @@ const make = Effect.gen(function* () {
       yield* operations.cancel(root, String(threadId));
       yield* explore.release(threadId, root);
     }
-    // Bot runs are keyed by their own checkout, which may be another one.
-    yield* bots.stopOwned(threadId);
   });
 
   // A turn that ended without completing (capped, cancelled, failed, rolled
   // back, its thread deleted or recovered) leaves no game work behind: its
-  // operations, queued or running, its explore session and its bot runs. A
+  // operations, queued or running, and its explore session. A
   // completed turn has no tool call in flight, and its explore session may
   // idle out between turns.
   const handle: GameTurnCancellationReactor["Service"]["handle"] = (event) => {

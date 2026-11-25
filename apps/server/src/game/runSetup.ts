@@ -21,7 +21,6 @@ import { failureText } from "./run/handBack.ts";
 import { runtimesDirectory } from "./gameRuntime.ts";
 import { insideGame, staysInsideGame } from "./gamePath.ts";
 import { RUNTIME_DTS_MODULES } from "./runtimeDts.ts";
-import { ensureGameDir } from "./gameKeptSaves.ts";
 
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 
@@ -224,12 +223,11 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
   });
 
 /**
- * Skill pack, bot kit and the run-state ignores, so every build the run keeps
- * has them. Only a new run refreshes the skills and the kit: a resume after a
- * server update would otherwise change them mid-run, and the next build would
- * carry harness text as its own work while earlier builds were made under
- * different guidance. A pack or kit that cannot be put in place fails the
- * start: roles told to read them would work without them.
+ * Skill pack and the run-state ignores, so every build the run keeps has them. Only a new run
+ * refreshes the skills: a resume after a server update would otherwise change them mid-run, and
+ * the next build would carry harness text as its own work while earlier builds were made under
+ * different guidance. A pack that cannot be put in place fails the start: roles told to read it
+ * would work without it.
  */
 export const ensureScaffold = (
   templates: string,
@@ -240,21 +238,6 @@ export const ensureScaffold = (
   Effect.gen(function* () {
     const io = <A>(what: string, path: string, work: () => Promise<A>) =>
       Effect.tryPromise({ try: work, catch: (cause) => ioError(what, path, cause) });
-    yield* io("Run scaffold", ".studio/bot", () => ensureGameDir(root, ".studio/bot"));
-    const copy = (from: string, to: string) =>
-      io("Run scaffold", NodePath.relative(root, to), async () => {
-        const present = await NodeFSP.access(to).then(
-          () => true,
-          () => false,
-        );
-        if (!fresh && present) return false;
-        await NodeFSP.cp(from, to, {
-          recursive: true,
-          force: true,
-          filter: (_from, into) => writableInGame(root, into),
-        });
-        return true;
-      });
     const hasSkills = yield* io("Run scaffold", "studio-skills", () =>
       NodeFSP.access(NodePath.join(root, "studio-skills")).then(
         () => true,
@@ -262,7 +245,6 @@ export const ensureScaffold = (
       ),
     );
     if (fresh || !hasSkills) yield* writeSkills(templates, root, engine);
-    yield* copy(NodePath.join(templates, "bot-kit"), NodePath.join(root, ".studio", "bot", "kit"));
     // The run-state ignores keep every build the run captures free of its
     // notes and records: a start that cannot write them fails, as for the pack.
     const ignore =
@@ -296,11 +278,9 @@ export const ensureScaffold = (
   });
 
 /**
- * The studio skills, and the bot kit a game already has, brought up to this
- * server's: a chat game has no run start to refresh them, and guidance written
- * after a game was made would otherwise never reach it. The kit is Kurambit's
- * (an agent's own bot sits beside it). A write that fails is logged, never the
- * caller's failure.
+ * The studio skills brought up to this server's: a chat game has no run start to refresh them,
+ * and guidance written after a game was made would otherwise never reach it. A write that fails
+ * is logged, never the caller's failure.
  */
 export const refreshSkills = (
   root: string,
@@ -308,21 +288,6 @@ export const refreshSkills = (
   templates: string,
 ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
   writeSkills(templates, root, engine).pipe(
-    Effect.andThen(
-      Effect.tryPromise(async () => {
-        const kit = NodePath.join(root, ".studio", "bot", "kit");
-        const present = await NodeFSP.access(kit).then(
-          () => true,
-          () => false,
-        );
-        if (present)
-          await NodeFSP.cp(NodePath.join(templates, "bot-kit"), kit, {
-            recursive: true,
-            force: true,
-            filter: (_from, into) => writableInGame(root, into),
-          });
-      }),
-    ),
     Effect.catchCause((cause) =>
       Effect.logWarning("the game's studio skills could not be updated", { game: root, cause }),
     ),

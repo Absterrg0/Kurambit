@@ -51,7 +51,6 @@ import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
-import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameEngine from "../GameEngine.ts";
 import * as GameFreshEyes from "../GameFreshEyes.ts";
@@ -101,7 +100,6 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const turnAdmission = yield* TurnAdmission.TurnAdmission;
   const builds = yield* GameBuilds.GameBuilds;
-  const bots = yield* GameBot.GameBot;
   const projects = yield* GameProjectService.GameProjectService;
   const engines = yield* GameEngine.GameEngine;
   const freshEyes = yield* GameFreshEyes.GameFreshEyes;
@@ -311,7 +309,6 @@ const make = Effect.gen(function* () {
         next: yield* nextLine(threadId),
         critique,
         ...(fresh === undefined ? {} : { fresh }),
-        bot: (yield* bots.latestPlayBot(root)) !== null,
         edited,
         decided: yield* decidedKeys(root).pipe(
           Effect.catchCause((cause) =>

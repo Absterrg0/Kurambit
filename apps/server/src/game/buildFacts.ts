@@ -4,7 +4,6 @@
 // measurement is a fact: a tool or the machine that kept a tier from playing
 // is "not measured", with whether waiting can clear it.
 import {
-  GAME_FACTS_BOUNDS,
   type GameBotRunResult,
   type GameBuildFacts,
   type GameBuildFactsSummary,
@@ -282,10 +281,6 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
   };
 };
 
-/** The wall budget a tier's bot run gets: the start, its span of play, and slack for boot and pacing. */
-export const tierWallSeconds = (playSeconds: number) =>
-  Math.min(600, GAME_FACTS_BOUNDS.startSeconds + playSeconds + 30);
-
 /**
  * The engine check of a build's copy as a fact, worded as the run's boot check
  * words it; `source` names a check made elsewhere of the same files.
@@ -306,49 +301,6 @@ export const bootsFact = (result: GameCheckResult, source?: string): Facts["boot
         }`,
   },
 });
-
-/**
- * The game's own play bot on a build. Its ending is the game's run state
- * when the game reports one; the bot's own end word is kept beside it, never
- * read as a win.
- */
-export const skilledFact = (
-  result: GameBotRunResult,
-  bot: { readonly file: string; readonly hash: string },
-  evidence: string | null,
-  machine: MachineLoad | null = null,
-): Facts["skilled"] => {
-  const status = result.status.state;
-  const note = result.status.note.slice(0, 200);
-  const played = round(result.gameSeconds);
-  const value = (
-    ending: "won" | "lost" | "no-ending" | "crashed" | "unresponsive" | "did-not-boot",
-    botWord: string | null,
-  ): Facts["skilled"] => ({
-    status: "measured",
-    value: {
-      ending,
-      at: ending === "won" || ending === "lost" ? played : null,
-      played,
-      note,
-      evidence,
-      bot,
-      botWord,
-    },
-  });
-  if (result.played === false) return notMeasured(`the bot did not play: ${note}`, false);
-  if (status === "crashed") return value(status, null);
-  if (status === "unresponsive")
-    return busyReading("the game stopped answering", machine) ?? value(status, null);
-  if (status === "not-booted") return value("did-not-boot", null);
-  if (status === "stopped") return notMeasured("the measurement was stopped", true);
-  if (status === "bot-error") return notMeasured(`the bot itself failed: ${note}`, false);
-  if (status === "budget") return tooSlow(result, GAME_FACTS_BOUNDS.skilledSeconds, machine);
-  const final = result.finalState;
-  if (final["state"] === "ended" && (final["result"] === "won" || final["result"] === "lost"))
-    return value(final["result"], null);
-  return value("no-ending", status);
-};
 
 /** A build captured before a turn began: a turn checkpoint (its thread and turn) or a run's build. */
 export interface EarlierBuild {

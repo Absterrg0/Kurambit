@@ -17,7 +17,6 @@ import {
 } from "@kurambit/contracts";
 import { engineProfile, unavailableEngine, type GameEngineProfile } from "./engineProfile.ts";
 import * as GameBlender from "./GameBlender.ts";
-import * as GameBot from "./GameBot.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GameExport from "./GameExport.ts";
 import * as GameOperations from "./GameOperations.ts";
@@ -81,7 +80,6 @@ const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
-  const gameBot = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
   const exporter = yield* GameExport.GameExport;
   const copies = yield* GameBuildCopies.GameBuildCopies;
@@ -254,10 +252,7 @@ const make = Effect.gen(function* () {
     yield* copies.stopFor(root);
     // Each stop is tried; one that did not end its processes is said, never reported stopped.
     const notStopped: string[] = [];
-    for (const [what, stopping] of [
-      ["the live Blender", liveBlender.stop(root)],
-      ["its bot runs", gameBot.stop(root)],
-    ] as const) {
+    for (const [what, stopping] of [["the live Blender", liveBlender.stop(root)]] as const) {
       const exit = yield* Effect.exit(stopping);
       if (exit._tag === "Failure") {
         notStopped.push(what);

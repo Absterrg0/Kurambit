@@ -41,7 +41,7 @@ const toolPurpose = (tool: GameToolStatus): string =>
     blender: "Models, rigs and renders game art.",
     uv: "Lets the agent work in a running Blender.",
     addon: "",
-    ffmpeg: "Records each bot play.",
+    ffmpeg: "Draws the asset library's contact sheets.",
   }[tool.tool];
 
 // Helpers that only matter through Blender sit under it, named by what they let a game do;
@@ -57,7 +57,7 @@ const toolAbout = (tool: GameToolStatus): string =>
         uv: "Kurambit fetches it itself when it is not installed.",
         addon: "",
         ffmpeg:
-          "A build's play checks and Keep going are read from its videos; without ffmpeg a build is only checked for starting.",
+          "Optional. Without it the asset library lists a pack's files with no pictures, and added sounds are not measured for loudness.",
       }[tool.tool];
 
 const TOOL_ICONS = {

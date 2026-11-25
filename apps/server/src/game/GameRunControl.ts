@@ -296,7 +296,6 @@ const make = Effect.gen(function* () {
       n: read.n,
       undoing: read.undoing,
       blocked: yield* blockedFor(threadId, root, projectRun),
-      botSetup: projectRun?.botSetup ?? null,
     });
   });
 
