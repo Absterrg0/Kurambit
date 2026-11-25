@@ -47,6 +47,11 @@ export function useGameLatestNext(
       : scopeThreadRef(threadRef.environmentId, ThreadId.make(sourceThread)),
   );
   if (source === null || sourceThread == null) return null;
+  // The chat that made the build already went on (its next turn, often this very Next, is under
+  // way or done): its old suggestion is that chat's work, not one to offer here.
+  const made = source.projection.runs.find((run) => run.id === runId);
+  if (made !== undefined && source.projection.runs.some((run) => run.ordinal > made.ordinal))
+    return null;
   const reply = source.projection.messages.findLast(
     (message) => message.role === "assistant" && !message.streaming && message.runId === runId,
   );
