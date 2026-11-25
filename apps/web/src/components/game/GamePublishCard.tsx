@@ -88,7 +88,7 @@ export function GamePublishCard({
   return (
     <section
       data-game-publish=""
-      className="flex flex-wrap items-start gap-4 rounded-lg border border-border bg-card p-4"
+      className="flex flex-wrap items-start gap-4 rounded-xl bg-card p-4"
     >
       <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
         <GlobeIcon className="size-4.5" aria-hidden="true" />

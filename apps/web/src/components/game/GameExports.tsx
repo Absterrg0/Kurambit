@@ -220,7 +220,7 @@ export function GameExports({
           <section
             key={target}
             data-game-build={target.toLowerCase()}
-            className="flex flex-wrap items-start gap-4 rounded-lg border border-border bg-card p-4"
+            className="flex flex-wrap items-start gap-4 rounded-xl bg-card p-4"
           >
             <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
               <Icon className="size-4.5" aria-hidden="true" />

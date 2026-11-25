@@ -42,16 +42,16 @@ const STANDARD_THEME_PREVIEW_COLORS: Record<
 > = {
   light: {
     sidebar: "#f2f0eb",
-    surface: "#ffffff",
-    accentSurface: "#f0eee9",
-    messageSurface: "#f1efea",
+    surface: "#fefdfb",
+    accentSurface: "#f2efe8",
+    messageSurface: "#f2efe8",
     ...SHARED_STANDARD_THEME_PREVIEW_COLORS.light,
   },
   dark: {
-    sidebar: "#0b0b0a",
-    surface: "#181817",
-    accentSurface: "#222220",
-    messageSurface: "#1f1f1d",
+    sidebar: "#111110",
+    surface: "#1b1a18",
+    accentSurface: "#24221f",
+    messageSurface: "#211f1d",
     ...SHARED_STANDARD_THEME_PREVIEW_COLORS.dark,
   },
 };

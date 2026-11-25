@@ -9,14 +9,14 @@ export type ThemePreviewColors = Readonly<{
 export const STANDARD_THEME_PREVIEW_COLORS: Readonly<Record<ThemeAppearance, ThemePreviewColors>> =
   {
     light: {
-      canvas: "#fcfcfc",
-      accent: "#f4f4f5",
-      messageAction: "#1b4ed8",
+      canvas: "#fdfcfa",
+      accent: "#f2efe8",
+      messageAction: "#c9461b",
     },
     dark: {
-      canvas: "#0a0a0a",
-      accent: "#141414",
-      messageAction: "#346bf1",
+      canvas: "#171614",
+      accent: "#24221f",
+      messageAction: "#cc4c1c",
     },
   };
 
