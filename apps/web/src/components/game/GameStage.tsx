@@ -100,6 +100,7 @@ import { GameStageOverlay } from "./GameStageOverlay";
 import { CODE_MODEL_PREFIX } from "./gameArt.logic";
 import {
   clearStageSelection,
+  freezeStage,
   toggleStageFreeze,
   useStageBridge,
   useStageStill,
@@ -573,6 +574,8 @@ function ThreadGameStage({
   const [leavingFold, setLeavingFold] = useState<GameFrameFold | null>(null);
   // The build the mounted frame plays, for telling a new build from a live edit of the same one.
   const [frameBuild, setFrameBuild] = useState<string | null>(null);
+  // The frame that replaced a game the person had paused: it comes up paused too, once it drew.
+  const [pausedKey, setPausedKey] = useState<string | null>(null);
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
   // A shown live game opens itself while the server says nobody asked for it
@@ -1020,6 +1023,21 @@ function ThreadGameStage({
     setLeavingFold(null);
     applyFold(leavingFold);
   });
+  const freezable = useThreadStageBridge(
+    threadKey,
+    (state) =>
+      state.status === "ready" &&
+      state.capabilities.includes("freeze") &&
+      state.owner === `${threadKey}\0${pausedKey}`,
+    false,
+  );
+  // Once per frame: the person's own Play on afterwards stands.
+  const pausedDone = useRef<string | null>(null);
+  useEffect(() => {
+    if (!freezable || pausedDone.current === pausedKey) return;
+    pausedDone.current = pausedKey;
+    freezeStage();
+  }, [freezable, pausedKey]);
   const leaveStage = rewind.leave;
   useEffect(() => {
     if (leavingKey !== null) void leaveStage().then(applyLeaving);
@@ -1172,6 +1190,10 @@ function ThreadGameStage({
       // A turn's build still being saved is not listed yet: the frame takes it once it is.
       setFrameBuild(landing ? null : folderBuild);
       setHeldBuild(false);
+      // A paused game is not mid-run, so a new build replaces it at once; the person's pause
+      // stands, or every build would set the Stage running again (and drawing, at a CPU's cost
+      // where WebGL is software).
+      setPausedKey(frozen && frameFold !== null ? computed.key : null);
     }
   } else if (frameBuild === null && folderBuild !== null && !landing) setFrameBuild(folderBuild);
   const frame = leaving && frameFold !== null ? frameFold : computed;

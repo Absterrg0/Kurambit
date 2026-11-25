@@ -331,6 +331,7 @@ const setStageFrozen = (on: boolean) => {
  * (GameFrame's pause when away), so a freeze is always the person's own.
  */
 export const toggleStageFreeze = () => setStageFrozen(!useStageBridge.getState().frozen);
+export const freezeStage = () => setStageFrozen(true);
 
 export const clearStageSelection = () => {
   const { post, selected } = useStageBridge.getState();
