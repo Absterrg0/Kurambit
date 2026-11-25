@@ -335,7 +335,7 @@ const statusLine = Effect.gen(function* () {
 
 const checkHandlers = (store: CheckpointStore["Service"]) =>
   ({
-    game_check: McpToolAccess.actsAsCaller((input) =>
+    game_check: McpToolAccess.actsAsCaller(({ includeImage, ...input }) =>
       dispatch(
         "game_check",
         input,
@@ -353,7 +353,7 @@ const checkHandlers = (store: CheckpointStore["Service"]) =>
             ),
         },
         "look",
-      ),
+      ).pipe(Effect.map(pictured(includeImage))),
     ),
   }) satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
 export const layerCheck = McpToolAccess.toLayer(
@@ -452,8 +452,19 @@ const playAct = (act: GamePlayActInput) =>
     ),
   );
 
+/**
+ * An answer as asked: with includeImage false, without its pictures (an agent after the facts
+ * alone); the paths it names stay.
+ */
+const pictured =
+  (includeImage: boolean | undefined) =>
+  (answer: unknown): unknown =>
+    includeImage !== false || typeof answer !== "object" || answer === null
+      ? answer
+      : Object.fromEntries(Object.entries(answer).filter(([key]) => key !== "screenshots"));
+
 const playHandlers = {
-  game_play: McpToolAccess.actsAsCaller((input) =>
+  game_play: McpToolAccess.actsAsCaller(({ includeImage, ...input }) =>
     dispatch("game_play", input, {
       act: playAct,
       close: (close) =>
@@ -486,7 +497,7 @@ const playHandlers = {
                 }),
               ).pipe(as(Schema.Struct({ saved: GameSavedPlaysResult }))),
       model_sheet: modelSheet,
-    }),
+    }).pipe(Effect.map(pictured(includeImage))),
   ),
 } satisfies McpToolAccess.Handlers<typeof GamePlayToolkit.tools>;
 export const layerPlay = McpToolAccess.toLayer(GamePlayToolkit, playHandlers);

@@ -29,6 +29,10 @@ const commandId = Schema.optionalKey(
 );
 
 const op = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema);
+/** Beside the op, never one: agents reach for it when the facts are all they need. */
+const includeImage = Schema.optionalKey(Schema.Boolean).annotate({
+  description: "false: the answer without its pictures; their paths stay.",
+});
 
 export const GameCheckToolInput = Schema.Struct({
   look: op(
@@ -52,6 +56,7 @@ export const GameCheckToolInput = Schema.Struct({
       ),
     }),
   ),
+  includeImage,
 });
 export type GameCheckToolInput = typeof GameCheckToolInput.Type;
 
@@ -68,6 +73,7 @@ export const GamePlayToolInput = Schema.Struct({
   ),
   eval: op(GameEvalInput),
   model_sheet: op(GameModelSheetInput),
+  includeImage,
 });
 export type GamePlayToolInput = typeof GamePlayToolInput.Type;
 
