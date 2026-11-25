@@ -61,7 +61,6 @@ import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { GamePicture } from "./GameBuildStill";
-import { HomeBackdrop } from "./HomeBackdrop";
 import { KurambitMark } from "../brand/KurambitBrand";
 import { useStageStill } from "./gameStageBridge";
 import {
@@ -114,7 +113,6 @@ export function GamesHome() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-        <HomeBackdrop />
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="relative min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
@@ -124,7 +122,7 @@ export function GamesHome() {
               // The stack sits in the middle of the page, so a short shelf leaves no void below.
               "min-h-full justify-center",
               // A little above the middle, where a centred block reads as centred.
-              firstRun ? "pb-32" : "gap-14 pt-12 pb-24",
+              firstRun ? "pb-32" : "gap-12 pt-12 pb-24",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -328,10 +326,9 @@ function BriefBox({
 
   return (
     <section className="flex w-full flex-col gap-3">
-      <KurambitMark className="mx-auto mb-2 size-14" />
-      {/* A plain, centred headline, the composer under it. */}
-      {/* oxlint-disable-next-line kurambit/no-raw-type-classes -- the same classes as T3's DraftHeroHeadline, the one hero line in the app. */}
-      <h1 className="mb-3 w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+      <KurambitMark className="mx-auto mb-1 size-14" />
+      {/* The one serif headline in the app, the brief under it. */}
+      <h1 className="mb-4 w-full text-center font-display text-hero text-strong-foreground">
         {firstRun ? "Make a game you want to play" : "What should we make next?"}
       </h1>
       <form
@@ -339,7 +336,8 @@ function BriefBox({
           event.preventDefault();
           void start();
         }}
-        className="flex w-full flex-col rounded-2xl border border-border bg-card shadow-composer transition-colors focus-within:border-foreground/20 dark:shadow-composer-dark"
+        // One calm card: the raised composer fill and its soft drop, a quiet rim while typing.
+        className="flex w-full flex-col rounded-xl surface-composer transition-shadow focus-within:surface-composer-focus"
       >
         <label htmlFor="game-brief" className="sr-only">
           Describe the game you want to make
@@ -477,7 +475,7 @@ function BriefBox({
                   aria-label={busy ? "Starting" : "Start building"}
                   disabled={busy || !ready || trimmedBrief.length === 0}
                   className={cn(
-                    "relative isolate flex size-8 items-center justify-center overflow-hidden rounded-full transition-[scale] duration-150 enabled:cursor-pointer hover:scale-105 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:hover:scale-100 [&_svg]:pointer-events-none",
+                    "relative isolate flex size-8 items-center justify-center overflow-hidden rounded-md enabled:cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none [&_svg]:pointer-events-none",
                     trimmedBrief.length > 0
                       ? "surface-lit text-primary-foreground hover:surface-lit-hover disabled:opacity-64"
                       : "surface-raised text-muted-foreground",
@@ -567,7 +565,7 @@ function BriefOptions({
         render={
           <Button
             type="button"
-            size="sm"
+            size="compact"
             variant="ghost-muted"
             disabled={disabled}
             aria-label={`First build options: models from ${modelChoiceLabel(characters, library)}`}
@@ -720,7 +718,7 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
       path={picture}
       gameName={name}
       mark="none"
-      className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset transition-shadow duration-150 group-hover:ring-foreground/30 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none"
+      className="aspect-video w-full rounded-xl ring-1 ring-foreground/8 ring-inset transition-shadow group-hover:ring-foreground/20 group-focus-visible:ring-2 group-focus-visible:ring-ring"
     >
       {/* Without a picture yet: the Stage's last frame, else what is being made, said where
           its picture will be, else the game's own colour. */}
@@ -760,9 +758,8 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
         >
           {frame}
           <span className="flex min-w-0 flex-col gap-0.5">
-            <Text variant="label" tone="strong" truncate>
-              {name}
-            </Text>
+            {/* The game's name in the serif, the one place a name is set as a title. */}
+            <span className="truncate font-display text-cover text-strong-foreground">{name}</span>
             {making ? null : <GameLibraryStatusText status={status} />}
             <CoverSummary build={build} status={status.text} />
           </span>
