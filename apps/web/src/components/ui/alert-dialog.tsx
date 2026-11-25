@@ -109,13 +109,12 @@ function AlertDialogFooter({
   );
 }
 
+// A confirmation asks a plain question, so it keeps the sans title; the serif is for dialogs
+// that are places (Export, Open a game).
 function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props) {
   return (
     <AlertDialogPrimitive.Title
-      className={cn(
-        "wrap-anywhere shrink-0 font-display text-display text-strong-foreground",
-        className,
-      )}
+      className={cn("wrap-anywhere shrink-0 text-title text-strong-foreground", className)}
       data-slot="alert-dialog-title"
       {...props}
     />
