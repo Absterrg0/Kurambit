@@ -625,8 +625,9 @@ export function GameFrame({
 
   useEffect(() => {
     // The outstanding-hide accounting IS the hint: a hide request is in flight
-    // until the game answers either way, and only an unmount or an ack retires it.
-    pendingAck.current = pendingAck.current || !visible;
+    // until the game answers it. Shown again, the game runs where it is seen, so
+    // there is nothing left to warn about.
+    pendingAck.current = !visible;
     setUnacknowledged(pendingAck.current);
     frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
     // A remount does not need a repost here: onLoad restates the current state
