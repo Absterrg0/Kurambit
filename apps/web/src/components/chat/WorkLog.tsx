@@ -54,14 +54,15 @@ function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
   return (
     <div
       className={cn(
-        "flex min-h-6 min-w-0 gap-1.5 text-sm leading-relaxed select-none [&_*]:select-none",
+        // A compact log line, as an agent's tool calls read in Cursor: 13px on a 28px pitch.
+        "flex min-h-7 min-w-0 gap-1.5 text-meta leading-relaxed select-none [&_*]:select-none",
         wrapLabel ? "items-start" : "items-center",
       )}
     >
       <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
         {icon ? (
-          <span className="relative w-6 shrink-0 leading-0">
-            <span className="inline-block size-6 overflow-hidden align-[calc(0.5cap_-_0.75rem)]">
+          <span className="relative w-5 shrink-0 leading-0">
+            <span className="inline-block size-5 overflow-hidden align-[calc(0.5cap_-_0.625rem)] [&_svg]:size-3.5!">
               <span className="flex size-full items-center justify-center">{icon}</span>
             </span>
           </span>
@@ -157,7 +158,7 @@ export function WorkLogDetails({
       className={cn(
         "cursor-auto",
         kind === "text"
-          ? "ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 select-text"
+          ? "ms-6.5 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 select-text"
           : kind === "panel"
             ? "mt-0.5 mb-1.5 pb-2"
             : "mt-1",

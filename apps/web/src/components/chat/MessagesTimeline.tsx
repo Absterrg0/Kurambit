@@ -300,6 +300,7 @@ import { WorkflowOpeningBlock } from "./WorkflowOpeningBlock";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
 import * as DateTime from "effect/DateTime";
+import { Text } from "../ui/text";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import {
@@ -3945,6 +3946,32 @@ function WorkGroupToggleTimelineRow({
   );
 }
 
+/**
+ * A work line as Cursor sets one: its verb ("Ran", "Read", "Used") in the label tone and what it
+ * acted on a step quieter, so a column of them reads by verb.
+ */
+function WorkVerbLabel({ text }: { text: string }) {
+  const space = text.indexOf(" ");
+  if (space <= 0) return text;
+  return (
+    <>
+      {text.slice(0, space)}
+      <span className="text-dim-foreground">{text.slice(space)}</span>
+    </>
+  );
+}
+
+/** How long a tool call took, when it says both ends: "4s", "1m 12s". Under a second says nothing. */
+function itemDurationLabel(
+  item:
+    | { readonly startedAt: DateTime.Utc | null; readonly completedAt: DateTime.Utc | null }
+    | undefined,
+): string | null {
+  if (item?.startedAt == null || item.completedAt == null) return null;
+  const ms = DateTime.toEpochMillis(item.completedAt) - DateTime.toEpochMillis(item.startedAt);
+  return ms < 1000 ? null : formatDuration(ms);
+}
+
 function WorkGroupHeader(props: {
   label: string;
   iconName: WorkEntryIconName;
@@ -3972,7 +3999,7 @@ function WorkGroupHeader(props: {
       }
       label={
         <span className={cn("block truncate", props.active && !props.failed && "live-tool-shine")}>
-          {props.label}
+          <WorkVerbLabel text={props.label} />
         </span>
       }
       trailing={
@@ -5487,6 +5514,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       }
     : {};
 
+  const projected = workEntry.projectedItem?.item;
+  const entryDuration =
+    projected !== undefined && "startedAt" in projected && "completedAt" in projected
+      ? itemDurationLabel(projected)
+      : null;
   return (
     <WorkLogRow
       data-v2-item-type={workEntry.projectedItem?.item.type}
@@ -5508,7 +5540,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       }
       label={
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
+          <p className="flex min-w-0 w-full items-baseline gap-1.5 leading-relaxed">
             <span
               className={cn(answerPreview ? "min-w-0" : "min-w-0 flex-1", "truncate", headingClass)}
             >
@@ -5584,6 +5616,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           !toolIconAcceptsTint(entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
+          {entryDuration === null ? null : (
+            <Text variant="caption" tone="dim" numeric render={<span className="shrink-0" />}>
+              {entryDuration}
+            </Text>
+          )}
           <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />
           <span
             className={cn(
