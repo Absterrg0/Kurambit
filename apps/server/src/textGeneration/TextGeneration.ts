@@ -46,9 +46,9 @@ type TextGenerationOp =
 type Registry = ProviderInstanceRegistry.ProviderInstanceRegistry["Service"];
 
 /**
- * Whether an instance can answer now: on, installed and reachable, and then whether the person is
- * signed in to it (`signed-in`) or it has not said (`maybe`: an installed CLI signed in to nothing
- * often reports no status at all).
+ * Whether an instance can answer now: on, installed, reachable and of a version Kurambit can use,
+ * and then whether the person is signed in to it (`signed-in`) or it has not said (`maybe`: an
+ * installed CLI signed in to nothing often reports no status at all).
  */
 const readiness = (instance: ProviderInstance) =>
   instance.enabled
@@ -56,7 +56,10 @@ const readiness = (instance: ProviderInstance) =>
         Effect.map((snapshot) =>
           !snapshot.enabled ||
           !snapshot.installed ||
+          snapshot.status === "error" ||
           snapshot.auth.status === "unauthenticated" ||
+          snapshot.compatibilityAdvisory?.status === "unsupported" ||
+          snapshot.compatibilityAdvisory?.status === "broken" ||
           !isProviderAvailable(snapshot) ||
           !isProviderTextGenerationCapable(snapshot)
             ? ("no" as const)
@@ -68,54 +71,73 @@ const readiness = (instance: ProviderInstance) =>
     : Effect.succeed("no" as const);
 
 /**
- * The instance a request goes to: the one it names while the person is signed in to it, else the
- * first they are signed in to, on its own default model. The setting defaults to one provider
- * whether or not the person ever signed into it, and a provider signed in to nothing fails every
- * title and game name (an installed OpenCode with no account answered "Model unavailable").
+ * Where a request may go, in order: the instance it names while the person is signed in to it,
+ * then each other one they are signed in to, then the named one and the others that only might
+ * be, each other on its own default model. The setting defaults to one provider whether or not
+ * the person ever signed into it, and an instance that says it is ready can still fail every call
+ * (an installed OpenCode too old for its server failed 15 of 15 titles), so each is tried in turn.
  */
-const route = <I extends { readonly modelSelection: ModelSelection }>(
+const candidates = <I extends { readonly modelSelection: ModelSelection }>(
   registry: Registry,
-  operation: TextGenerationOp,
   input: I,
-): Effect.Effect<
-  { readonly textGeneration: ProviderInstance["textGeneration"]; readonly input: I },
-  TextGenerationError
-> =>
+) =>
   Effect.gen(function* () {
     const named = yield* registry.getInstance(input.modelSelection.instanceId);
     const namedReady = named === undefined ? ("no" as const) : yield* readiness(named);
+    const onDefault = (instance: ProviderInstance) => ({
+      textGeneration: instance.textGeneration,
+      input: {
+        ...input,
+        modelSelection: {
+          instanceId: instance.instanceId,
+          model:
+            DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[instance.driverKind] ??
+            DEFAULT_MODEL_BY_PROVIDER[instance.driverKind] ??
+            DEFAULT_TEXT_GENERATION_MODEL,
+        },
+      },
+    });
+    const signedIn: Array<{ textGeneration: ProviderInstance["textGeneration"]; input: I }> = [];
+    const maybe: typeof signedIn = [];
     if (named !== undefined && namedReady === "signed-in")
-      return { textGeneration: named.textGeneration, input };
-    // One the person is signed in to first; one that only might be goes last, the named first.
-    let signedIn: ProviderInstance | undefined;
-    let maybe: ProviderInstance | undefined;
+      signedIn.push({ textGeneration: named.textGeneration, input });
+    if (named !== undefined && namedReady === "maybe")
+      maybe.push({ textGeneration: named.textGeneration, input });
     for (const instance of yield* registry.listInstances) {
       if (instance === named) continue;
       const ready = yield* readiness(instance);
-      if (ready === "signed-in") {
-        signedIn = instance;
-        break;
-      }
-      if (ready === "maybe") maybe ??= instance;
+      if (ready === "signed-in") signedIn.push(onDefault(instance));
+      else if (ready === "maybe") maybe.push(onDefault(instance));
     }
-    if (signedIn === undefined && named !== undefined && namedReady === "maybe")
-      return { textGeneration: named.textGeneration, input };
-    const fallback = signedIn ?? maybe;
-    if (fallback !== undefined) {
-      const model =
-        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback.driverKind] ??
-        DEFAULT_MODEL_BY_PROVIDER[fallback.driverKind] ??
-        DEFAULT_TEXT_GENERATION_MODEL;
-      return {
-        textGeneration: fallback.textGeneration,
-        input: { ...input, modelSelection: { instanceId: fallback.instanceId, model } },
-      };
-    }
-    if (named !== undefined) return { textGeneration: named.textGeneration, input };
-    return yield* new TextGenerationError({
+    const all = [...signedIn, ...maybe];
+    // With nothing ready, the named one says why it cannot answer.
+    return all.length === 0 && named !== undefined
+      ? [{ textGeneration: named.textGeneration, input }]
+      : all;
+  });
+
+/** `call` on each candidate in turn until one answers; the last failure when none does. */
+const route = <I extends { readonly modelSelection: ModelSelection }, A>(
+  registry: Registry,
+  operation: TextGenerationOp,
+  input: I,
+  call: (
+    textGeneration: ProviderInstance["textGeneration"],
+    input: I,
+  ) => Effect.Effect<A, TextGenerationError>,
+): Effect.Effect<A, TextGenerationError> =>
+  Effect.gen(function* () {
+    const tries = yield* candidates(registry, input);
+    let failure: TextGenerationError = new TextGenerationError({
       operation,
       detail: `No provider instance registered for id '${input.modelSelection.instanceId}'.`,
     });
+    for (const each of tries) {
+      const answered = yield* Effect.result(call(each.textGeneration, each.input));
+      if (answered._tag === "Success") return answered.success;
+      failure = answered.failure;
+    }
+    return yield* failure;
   });
 
 /** @public Service construction is part of the canonical Effect module API. */
@@ -123,32 +145,32 @@ export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   return TextGeneration.of({
     generateCommitMessage: (input) =>
-      route(registry, "generateCommitMessage", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generateCommitMessage(routed.input)),
+      route(registry, "generateCommitMessage", input, (textGeneration, routed) =>
+        textGeneration.generateCommitMessage(routed),
       ),
     generatePrContent: (input) =>
-      route(registry, "generatePrContent", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generatePrContent(routed.input)),
+      route(registry, "generatePrContent", input, (textGeneration, routed) =>
+        textGeneration.generatePrContent(routed),
       ),
     generateBranchName: (input) =>
-      route(registry, "generateBranchName", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generateBranchName(routed.input)),
+      route(registry, "generateBranchName", input, (textGeneration, routed) =>
+        textGeneration.generateBranchName(routed),
       ),
     generateGameName: (input) =>
-      route(registry, "generateGameName", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generateGameName(routed.input)),
+      route(registry, "generateGameName", input, (textGeneration, routed) =>
+        textGeneration.generateGameName(routed),
       ),
     generateReviewGuide: (input) =>
-      route(registry, "generateReviewGuide", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generateReviewGuide(routed.input)),
+      route(registry, "generateReviewGuide", input, (textGeneration, routed) =>
+        textGeneration.generateReviewGuide(routed),
       ),
     generateThreadTitle: (input) =>
-      route(registry, "generateThreadTitle", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generateThreadTitle(routed.input)),
+      route(registry, "generateThreadTitle", input, (textGeneration, routed) =>
+        textGeneration.generateThreadTitle(routed),
       ),
     generateImageReview: (input) =>
-      route(registry, "generateImageReview", input).pipe(
-        Effect.flatMap((routed) => routed.textGeneration.generateImageReview(routed.input)),
+      route(registry, "generateImageReview", input, (textGeneration, routed) =>
+        textGeneration.generateImageReview(routed),
       ),
   });
 });

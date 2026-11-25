@@ -5,7 +5,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { describe, expect } from "vite-plus/test";
 
-import { ProviderInstanceId } from "@kurambit/contracts";
+import { ProviderInstanceId, TextGenerationError } from "@kurambit/contracts";
 import { createModelSelection } from "@kurambit/shared/model";
 
 import type { ProviderInstance } from "@kurambit/provider-core/server/driver";
@@ -203,6 +203,47 @@ describe("TextGeneration.make", () => {
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
       });
       expect(result.name).toBe("Neon Drone");
+    }),
+  );
+
+  it.effect("tries the next signed-in provider when one fails", () =>
+    Effect.gen(function* () {
+      const codex = makeStubInstance(
+        ProviderInstanceId.make("codex"),
+        makeStubTextGeneration({}),
+        "unauthenticated",
+      );
+      // Signed in, yet every call fails: an OpenCode too old for its own server.
+      const opencode = makeStubInstance(
+        ProviderInstanceId.make("opencode"),
+        makeStubTextGeneration({
+          generateThreadTitle: () =>
+            Effect.fail(
+              new TextGenerationError({
+                operation: "generateThreadTitle",
+                detail: "OpenCode session.prompt request failed.",
+              }),
+            ),
+        }),
+      );
+      const claude = makeStubInstance(
+        ProviderInstanceId.make("claudeAgent"),
+        makeStubTextGeneration({
+          generateThreadTitle: () => Effect.succeed({ title: "Neon drone arena" }),
+        }),
+      );
+      const tg = yield* TextGeneration.make.pipe(
+        Effect.provideService(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          makeStubRegistry([codex, opencode, claude]),
+        ),
+      );
+      const result = yield* tg.generateThreadTitle({
+        cwd: process.cwd(),
+        message: "A small arena game",
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+      });
+      expect(result.title).toBe("Neon drone arena");
     }),
   );
 
