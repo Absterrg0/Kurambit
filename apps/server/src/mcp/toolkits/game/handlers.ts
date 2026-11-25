@@ -424,18 +424,22 @@ const replayMoment = (input: { readonly run: string; readonly at?: number }) =>
   );
 
 /**
- * An act, with the frames its labelled screenshot steps took as images, in route order. The
- * act's closing picture stays a path: the agent reads it when it wants it.
+ * An act, with its pictures as images: the frames its labelled screenshot steps took, in route
+ * order, then the picture it ended on. Agents read the closing picture after almost every act
+ * (7 of 10 in Gutterlight's first turn), each a round trip of its own.
  */
 const playAct = (act: GamePlayActInput) =>
   Effect.gen(function* () {
     const result = yield* withGame(GameExplore.GameExplore, (explore, threadId) =>
       explore.play(threadId, act),
     );
-    const frames = result.frames ?? [];
-    if (frames.length === 0) return result;
+    const paths = [
+      ...(result.frames ?? []).map((frame) => frame.path),
+      ...(result.screenshotPath === null ? [] : [result.screenshotPath]),
+    ];
+    if (paths.length === 0) return result;
     const shots = yield* Effect.promise(() =>
-      Promise.all(frames.map((frame) => NodeFSP.readFile(frame.path).then(png, () => null))),
+      Promise.all(paths.map((path) => NodeFSP.readFile(path).then(png, () => null))),
     );
     const screenshots = shots.filter((shot) => shot !== null);
     return screenshots.length === 0 ? result : { ...result, screenshots };
