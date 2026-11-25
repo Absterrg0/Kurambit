@@ -1814,7 +1814,8 @@ function ThreadGameStage({
           <GameStageBar
             threadRef={threadRef}
             canLose={data.canLose !== false}
-            playing={phase.kind === "playing" && stageKind !== "window"}
+            // What the Stage shows: under the first build's card no game plays yet, whatever loads.
+            playing={shownPhase.kind === "playing" && stageKind !== "window"}
             live={stageKind === "live" && playTarget === null}
             stopped={folderDoesNotStart && failureVisible !== null && playTarget === null}
             canReload={stageKind === "live" && playTarget === null && data.previewUrl !== null}
