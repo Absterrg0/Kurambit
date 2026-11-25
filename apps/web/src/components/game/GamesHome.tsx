@@ -57,6 +57,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Skeleton } from "../ui/skeleton";
+import { Atmosphere } from "../brand/Atmosphere";
 import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -113,16 +114,16 @@ export function GamesHome() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+        <Atmosphere />
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="relative min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div
             className={cn(
               "mx-auto flex w-full max-w-200 flex-col px-8",
-              // The stack sits in the middle of the page, so a short shelf leaves no void below.
-              "min-h-full justify-center",
-              // A little above the middle, where a centred block reads as centred.
-              firstRun ? "pb-32" : "gap-12 pt-12 pb-24",
+              // The hero and the brief sit in the page's middle third, under the atmosphere;
+              // the games follow below. Alone, the brief is centred a little above the middle.
+              firstRun ? "min-h-full justify-center pb-32" : "gap-12 pt-36 pb-24",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -465,21 +466,15 @@ function BriefBox({
             disabled={busy}
           />
           <span className="flex-1" />
-          {/* Lit only once there is a brief to build: an empty box's Enter just focuses it. */}
-          {/* The composer's own send disc: lit once there is a brief to build. */}
           <Tooltip>
             <TooltipTrigger
               render={
                 <button
                   type="submit"
                   aria-label={busy ? "Starting" : "Start building"}
-                  disabled={busy || !ready || trimmedBrief.length === 0}
-                  className={cn(
-                    "relative isolate flex size-8 items-center justify-center overflow-hidden rounded-md enabled:cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none [&_svg]:pointer-events-none",
-                    trimmedBrief.length > 0
-                      ? "surface-lit text-primary-foreground hover:surface-lit-hover disabled:opacity-64"
-                      : "surface-raised text-muted-foreground",
-                  )}
+                  // The box's one accent: lit even while empty, where Start just focuses the box.
+                  disabled={busy || !ready}
+                  className="relative isolate flex size-8 items-center justify-center overflow-hidden rounded-md surface-lit text-primary-foreground enabled:cursor-pointer hover:surface-lit-hover focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none"
                 />
               }
             >
@@ -559,23 +554,34 @@ function BriefOptions({
   onLibrary: (library: boolean) => void;
   disabled: boolean;
 }) {
+  // At its default the choice is a quiet icon with a tooltip; once changed it names its value,
+  // so a brief never goes out on a setting the box hides.
+  const changed =
+    characters !== GAME_STYLE_DEFAULT_CHARACTERS || library !== GAME_STYLE_DEFAULT_LIBRARY;
+  const label = `Models: ${modelChoiceLabel(characters, library)}`;
   return (
     <Menu>
-      <MenuTrigger
-        render={
-          <Button
-            type="button"
-            size="compact"
-            variant="ghost-muted"
-            disabled={disabled}
-            aria-label={`First build options: models from ${modelChoiceLabel(characters, library)}`}
-          />
-        }
-      >
-        <SlidersHorizontalIcon aria-hidden />
-        {/* The one choice it holds, named with its value, so the icon is never a riddle. */}
-        Models: {modelChoiceLabel(characters, library)}
-      </MenuTrigger>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={
+                <Button
+                  type="button"
+                  size={changed ? "compact" : "icon-sm"}
+                  variant="ghost-muted"
+                  disabled={disabled}
+                  aria-label={`First build options: ${label}`}
+                />
+              }
+            />
+          }
+        >
+          <SlidersHorizontalIcon aria-hidden />
+          {changed ? label : null}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
       <MenuPopup align="start" className="w-72">
         <MenuGroup>
           <MenuGroupLabel>Make models with</MenuGroupLabel>

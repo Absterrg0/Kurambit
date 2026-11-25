@@ -131,17 +131,22 @@ export function SidebarChatRow({
   onContextMenu: (position: { x: number; y: number }) => void;
   rowProps?: Record<string, unknown>;
 }) {
+  // Line 1 is the chat: its title, its state, and when it last moved (or, under a pointer or
+  // the keyboard, its one action). Line 2 is quiet meta: its game's tile and name.
   const lines = (
     <>
       <span className="flex h-5 min-w-0 items-center gap-1.5">
-        <span className="relative size-4 shrink-0">{picture}</span>
-        {pinned ? (
-          <PinIcon aria-label="Pinned" className="size-3 shrink-0 text-dim-foreground" />
-        ) : null}
-        <Text variant="meta" tone="muted" truncate render={<span className="flex-1" />}>
-          {game}
-        </Text>
-        {/* How long ago, until a pointer or the keyboard is on the row: then its action. */}
+        {renaming ?? (
+          <Text
+            variant="label"
+            tone={resting && !active ? "muted" : "default"}
+            truncate
+            render={<span className="flex-1" />}
+          >
+            {title}
+          </Text>
+        )}
+        <RowMark mark={mark} broken={broken} />
         <span
           className={cn(
             "flex h-5 shrink-0 items-center justify-end",
@@ -171,18 +176,14 @@ export function SidebarChatRow({
           )}
         </span>
       </span>
-      <span className="mt-1 flex min-w-0 items-center gap-1.5">
-        {renaming ?? (
-          <Text
-            variant="label"
-            tone={resting && !active ? "muted" : "default"}
-            truncate
-            render={<span className="flex-1" />}
-          >
-            {title}
-          </Text>
-        )}
-        <RowMark mark={mark} broken={broken} />
+      <span className="mt-1 flex h-4 min-w-0 items-center gap-1.5">
+        <span className="relative size-3.5 shrink-0">{picture}</span>
+        {pinned ? (
+          <PinIcon aria-label="Pinned" className="size-3 shrink-0 text-dim-foreground" />
+        ) : null}
+        <Text variant="meta" tone="muted" truncate>
+          {game}
+        </Text>
       </span>
       {note === null ? null : <RowNote note={note} />}
     </>

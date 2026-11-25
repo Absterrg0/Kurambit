@@ -132,7 +132,7 @@ function getIconOption(
 }
 
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
-  return shouldUseDarkColors ? "#0b0b0a" : "#e9e6de";
+  return shouldUseDarkColors ? "#111110" : "#f2f0eb";
 }
 
 type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;

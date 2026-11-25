@@ -521,7 +521,8 @@ export default function Sidebar() {
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
-        className="min-h-full"
+        // Row and section titles read a step larger here than the 14px label elsewhere.
+        className="min-h-full [--type-label:0.9375rem]"
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
@@ -556,11 +557,11 @@ export default function Sidebar() {
               ref={listRef}
               aria-label="Chats"
               onKeyDown={onListKeyDown}
-              className="mt-1 flex flex-col"
+              className="flex flex-col gap-1"
             >
               {atWork.map((row) => renderRow(row, "list"))}
               {list.settled.length > 0 || draggingSettles ? (
-                <li className="mt-1 list-none">
+                <li className="mt-4 list-none">
                   <SettledShelfHeader
                     count={list.settled.length}
                     expanded={shelfOpen}
@@ -583,7 +584,7 @@ export default function Sidebar() {
                 </li>
               ) : null}
               {list.archived.length > 0 ? (
-                <li className="list-none">
+                <li className="mt-2 list-none">
                   <SidebarShelfHeader
                     label="Archived"
                     count={list.archived.length}
@@ -770,7 +771,7 @@ function ChatRow({
             chats={null}
             gameName={name}
             read={leaseLiveStatus}
-            className="size-4"
+            className="size-3.5"
             icon
           />
         }

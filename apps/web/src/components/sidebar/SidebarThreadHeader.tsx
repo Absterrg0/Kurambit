@@ -1,10 +1,9 @@
-import { SearchIcon, SquarePenIcon } from "lucide-react";
+import { PlusIcon, SearchIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ArrivalDot } from "../game/ArrivalDot";
-import { Kbd } from "../ui/kbd";
+import { Button } from "../ui/button";
 import { Text } from "../ui/text";
-import { SIDEBAR_ROW } from "./SidebarChatRows";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface SidebarThreadHeaderProps {
   onNewGame: () => void;
@@ -14,7 +13,7 @@ export interface SidebarThreadHeaderProps {
   searchShortcutLabel: string | null;
 }
 
-/** The sidebar's places: start a game, and find anything. */
+/** The chats' section header, with its two ways in inline: find anything, start a game. */
 export function SidebarThreadHeader({
   onNewGame,
   newGameShortcutLabel,
@@ -22,61 +21,43 @@ export function SidebarThreadHeader({
   searchShortcutLabel,
 }: SidebarThreadHeaderProps) {
   return (
-    <div className="flex flex-col gap-px">
-      <SidebarHeaderRow
-        icon={<SquarePenIcon />}
-        label="New game"
-        shortcut={newGameShortcutLabel}
-        onClick={onNewGame}
-      />
-      <SidebarHeaderRow
-        icon={<SearchIcon />}
-        label="Search"
-        shortcut={searchShortcutLabel}
-        onClick={onSearch}
-      />
+    <div className="flex h-8 items-center gap-0.5 ps-2.5 pe-1">
+      <Text variant="label" render={<h2 className="min-w-0 flex-1 truncate" />}>
+        Chats
+      </Text>
+      <HeaderAction label="Search" shortcut={searchShortcutLabel} onClick={onSearch}>
+        <SearchIcon />
+      </HeaderAction>
+      <HeaderAction label="New game" shortcut={newGameShortcutLabel} onClick={onNewGame}>
+        <PlusIcon />
+      </HeaderAction>
     </div>
   );
 }
 
-function SidebarHeaderRow({
-  icon,
+function HeaderAction({
   label,
   shortcut,
-  active = false,
-  news = false,
   onClick,
+  children,
 }: {
-  icon: ReactNode;
   label: string;
   shortcut: string | null;
-  active?: boolean;
-  /** Just arrived and not opened yet. */
-  news?: boolean;
   onClick: () => void;
+  children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      data-active={active}
-      aria-current={active ? "page" : undefined}
-      onClick={onClick}
-      className={SIDEBAR_ROW}
-    >
-      {/* The icon sits where a game's picture does, so the column reads as one list. */}
-      <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">
-        {icon}
-      </span>
-      <Text variant="label" tone={active ? "default" : "muted"} truncate>
-        {label}
-      </Text>
-      <ArrivalDot on={news} />
-      {/* The shortcut is a reminder for the row in hand; at rest it only crowds the column. */}
-      {shortcut === null ? null : (
-        <span className="ms-auto opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100">
-          <Kbd>{shortcut}</Kbd>
-        </span>
-      )}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button size="icon-xs" variant="ghost-muted" aria-label={label} onClick={onClick} />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
+      </TooltipPopup>
+    </Tooltip>
   );
 }

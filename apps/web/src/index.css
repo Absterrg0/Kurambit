@@ -1586,6 +1586,41 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   }
 }
 
+/* The one atmosphere, behind empty states only (Home's hero, a game's empty chat): a warm
+   halftone glow falling from the top of the panel, an ordered dither like a print. The fill is
+   the glow; the mask is solid at its heart and only dots further out, so the glow breaks into
+   dots as it fades. The core layer adds coarser offset dots between the two, where a printed
+   halftone's dots swell. Static: nothing here animates. */
+@utility atmosphere {
+  --atmosphere-ink: color-mix(in oklch, var(--live), #f0a43a 45%);
+  --atmosphere-strength: 22%;
+  position: absolute;
+  inset: 0 0 auto;
+  height: 75%;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 85% 100% at 50% 0%,
+    color-mix(in srgb, var(--atmosphere-ink) var(--atmosphere-strength), transparent),
+    color-mix(in srgb, var(--atmosphere-ink) calc(var(--atmosphere-strength) * 0.4), transparent)
+      55%,
+    transparent 90%
+  );
+  mask:
+    radial-gradient(ellipse 30% 45% at 50% 0%, #000 20%, transparent 100%),
+    radial-gradient(circle, #000 0 1.1px, transparent 1.6px) 0 0 / 6px 6px;
+
+  @variant dark {
+    --atmosphere-strength: 34%;
+  }
+}
+@utility atmosphere-core {
+  @apply atmosphere;
+  mask:
+    radial-gradient(circle, #000 0 1.9px, transparent 2.4px) 3px 3px / 6px 6px,
+    radial-gradient(ellipse 50% 70% at 50% 0%, #000 30%, transparent 85%);
+  mask-composite: intersect;
+}
+
 /* Checked controls and switch thumbs. */
 @utility surface-gloss-on {
   background: linear-gradient(var(--primary), var(--primary));
@@ -1620,7 +1655,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   color-scheme: light;
   --radius: 0.5rem;
   --background: #fdfcfa;
-  --app-chrome-background: #e9e6de;
+  /* The window is the sidebar's level: the sidebar sits flush on it, the main panel is inset. */
+  --app-chrome-background: var(--sidebar);
   --toolbar-background: var(--background);
   --toolbar-foreground: var(--foreground);
   --toolbar-border: var(--border);
@@ -1695,7 +1731,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   @variant dark {
     color-scheme: dark;
     --background: #171614;
-    --app-chrome-background: #0b0b0a;
     --toolbar-control-hover: #292724;
     --surface-raised: #211f1d;
     --foreground: #eeebe4;
