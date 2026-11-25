@@ -1571,6 +1571,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   }
 }
 
+/* The atmosphere on the Stage, which is black in either appearance. */
+@utility atmosphere-stage {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 600px;
+  pointer-events: none;
+  background: url("/atmosphere-dark.png") top center / 1920px 600px no-repeat;
+  image-rendering: pixelated;
+}
+
 /* Checked controls and switch thumbs. */
 @utility surface-gloss-on {
   background: linear-gradient(var(--primary), var(--primary));

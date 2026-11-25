@@ -775,14 +775,8 @@ function StageStateCard({
   if (phase.kind === "playing") return null;
   return (
     <div className="relative isolate size-full">
-      <span
-        aria-hidden
-        className="surface-grain pointer-events-none absolute inset-0 -z-10 mix-blend-overlay"
-      />
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 bg-radial from-transparent to-black/45"
-      />
+      {/* The Stage with no game on it is an empty state, under the app's one atmosphere. */}
+      <span aria-hidden className="atmosphere-stage -z-10" />
       <div className="flex size-full flex-col items-center justify-center gap-5 overflow-y-auto p-6 text-center scrollbar-gutter-both">
         <Text
           variant="title"

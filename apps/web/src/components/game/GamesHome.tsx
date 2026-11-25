@@ -740,9 +740,10 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
     chats: cover.chats,
     read: leaseLiveStatus,
   });
+  // A game at work says so in its own line (what it is making), so the right side stays quiet.
   const chip =
     status.tone === "live"
-      ? { tone: "live" as const, label: "Working" }
+      ? null
       : status.tone === "failed"
         ? { tone: "danger" as const, label: "Failed" }
         : status.tone === "broken"
