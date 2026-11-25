@@ -114,7 +114,8 @@ const TEXT = `(() => {
     if (!own) continue;
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
-    if (rect.width < 1 || rect.height < 1 || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+    // An ancestor faded out or hidden hides it too: the browser's own answer, as a player sees it.
+    if (rect.width < 1 || rect.height < 1 || !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
     if (rect.bottom < 0 || rect.right < 0 || rect.top > innerHeight || rect.left > innerWidth) continue;
     const said = el.innerText.trim();
     const count = said.split(/\\s+/).filter(Boolean).length;

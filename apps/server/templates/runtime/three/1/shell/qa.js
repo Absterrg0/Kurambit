@@ -296,8 +296,9 @@ export function createQa({
           .join("")
           .trim();
         if (own === "") continue;
-        const style = getComputedStyle(element);
-        if (style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        // Opacity is not inherited: text in a faded-out card reads opacity 1 on its own style.
+        // What a player can see is the browser's own answer, ancestors included.
+        if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
         const rect = element.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) continue;
         items.push({ element, text: own.slice(0, 60), rect });
