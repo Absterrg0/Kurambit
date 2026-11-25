@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   ArchiveRestoreIcon,
   CircleCheckIcon,
+  CircleIcon,
   ClockIcon,
   CopyIcon,
   PinIcon,
@@ -21,14 +22,14 @@ import type { ChatMark, ChatNote } from "./chatList.logic";
 const SIDEBAR_ROW =
   "group/row relative flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:surface-sidebar-row-selected";
 
-/** What a chat is doing, in one mark at the end of its title; nothing when idle. */
-function RowMark({ mark, broken }: { mark: ChatMark; broken: boolean }) {
+/**
+ * What a chat is doing, as the icon that leads its row: waiting on the person, at work, a build
+ * that does not start, settled, or a quiet ring when it is simply there.
+ */
+function RowLead({ mark, broken, resting }: { mark: ChatMark; broken: boolean; resting: boolean }) {
   if (mark === "waiting")
     return (
-      <span
-        className="flex size-4 shrink-0 items-center justify-center"
-        aria-label="Waiting on you"
-      >
+      <span aria-label="Waiting on you" className="flex size-4 items-center justify-center">
         <StatusDot tone="warning" size="md" />
       </span>
     );
@@ -37,10 +38,12 @@ function RowMark({ mark, broken }: { mark: ChatMark; broken: boolean }) {
     return (
       <TriangleAlertIcon
         aria-label="Its build does not start"
-        className="size-3.5 shrink-0 text-destructive"
+        className="size-3.5 text-destructive"
       />
     );
-  return null;
+  if (resting)
+    return <CircleCheckIcon aria-label="Settled" className="size-3.5 text-dim-foreground" />;
+  return <CircleIcon aria-hidden="true" className="size-3 text-dim-foreground" />;
 }
 
 /** What a row offers on hover: settle a chat at work, bring a settled or archived one back. */
@@ -90,6 +93,7 @@ export function SidebarChatRow({
   picture,
   pigment,
   game,
+  detail = null,
   title,
   time,
   active,
@@ -110,6 +114,8 @@ export function SidebarChatRow({
   /** The game's pigment: the open chat's row takes a soft tint and a thin edge in it. */
   pigment: string;
   game: string;
+  /** Quiet facts after the game's name: the newest build this chat made and its files. */
+  detail?: string | null;
   title: string;
   time: ReactNode;
   /** The chat on screen. */
@@ -133,7 +139,7 @@ export function SidebarChatRow({
 }) {
   // Line 1 is the chat: its title, its state, and when it last moved (or, under a pointer or
   // the keyboard, its one action). Line 2 is quiet meta: its game's tile and name.
-  const lines = (
+  const body = (
     <>
       <span className="flex h-5 min-w-0 items-center gap-1.5">
         {renaming ?? (
@@ -146,7 +152,6 @@ export function SidebarChatRow({
             {title}
           </Text>
         )}
-        <RowMark mark={mark} broken={broken} />
         <span
           className={cn(
             "flex h-5 shrink-0 items-center justify-end",
@@ -176,7 +181,7 @@ export function SidebarChatRow({
           )}
         </span>
       </span>
-      <span className="mt-1 flex h-4 min-w-0 items-center gap-1.5">
+      <span className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5">
         <span className="relative size-3.5 shrink-0">{picture}</span>
         {pinned ? (
           <PinIcon aria-label="Pinned" className="size-3 shrink-0 text-dim-foreground" />
@@ -184,12 +189,25 @@ export function SidebarChatRow({
         <Text variant="meta" tone="muted" truncate>
           {game}
         </Text>
+        {detail === null ? null : (
+          <Text variant="meta" tone="dim" numeric render={<span className="shrink-0" />}>
+            · {detail}
+          </Text>
+        )}
       </span>
       {note === null ? null : <RowNote note={note} />}
     </>
   );
+  const lines = (
+    <>
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+        <RowLead mark={mark} broken={broken} resting={resting} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">{body}</span>
+    </>
+  );
   const surface =
-    "relative flex w-full min-w-0 flex-col rounded-md px-2.5 py-2 text-left outline-none";
+    "relative flex w-full min-w-0 items-start gap-2 rounded-md ps-2 pe-2.5 py-1.5 text-left outline-none";
   return (
     <div className="group/chat relative py-0.5">
       {renaming === null ? (
@@ -221,7 +239,7 @@ export function SidebarChatRow({
       )}
       {action === null || dropping !== null || renaming !== null ? null : (
         // Over the time's place on the first line, never inside the row's own button.
-        <span className="invisible absolute end-1.5 top-2.5 flex h-5 items-center group-hover/chat:visible group-has-[:focus-visible]/chat:visible">
+        <span className="invisible absolute end-1.5 top-2 flex h-5 items-center group-hover/chat:visible group-has-[:focus-visible]/chat:visible">
           <Button
             size="micro"
             variant="ghost-muted"
@@ -271,6 +289,20 @@ export function SidebarShelfHeader({
     >
       {label}
     </CollapsibleSectionHeader>
+  );
+}
+
+/** A group of the chats at work, by what they need: "Needs you 1", "Working 2", "Recent 5". */
+export function SidebarGroupHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <h3 className="flex h-7 items-center gap-1.5 px-2.5" data-sidebar-group={label.toLowerCase()}>
+      <Text variant="caption" tone="muted">
+        {label}
+      </Text>
+      <Text variant="caption" tone="dim" numeric>
+        {count}
+      </Text>
+    </h3>
   );
 }
 

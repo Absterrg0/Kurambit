@@ -239,9 +239,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
      --type-* variables on :root, which step up on phones. Text colour is
      separate: pick a tier (strong, default, muted, dim). Render them through
      <Text> in components/ui/text.tsx. */
-  /* The serif roles, always with font-display and in three places only: hero is
-     Home's headline, display a dialog's title, cover a game's name under its
-     Home cover. */
+  /* The serif roles, always with font-display: hero is Home's headline, display a
+     dialog's title. */
   --text-hero: var(--type-hero);
   --text-hero--line-height: 1.05;
   --text-hero--font-weight: 400;
@@ -250,9 +249,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --text-display--line-height: 1.1;
   --text-display--font-weight: 400;
   --text-display--letter-spacing: -0.005em;
-  --text-cover: 1.375rem;
-  --text-cover--line-height: 1.15;
-  --text-cover--font-weight: 400;
   --text-title: var(--type-title);
   --text-title--line-height: 1.27;
   --text-title--font-weight: 600;

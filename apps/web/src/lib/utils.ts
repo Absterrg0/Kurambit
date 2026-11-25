@@ -18,7 +18,6 @@ const twMerge = extendTailwindMerge({
         "5xs",
         "hero",
         "display",
-        "cover",
         "title",
         "prompt",
         "label",

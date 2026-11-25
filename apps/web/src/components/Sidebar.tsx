@@ -92,6 +92,7 @@ import {
 } from "./sidebar/chatList.logic";
 import {
   SidebarChatRow,
+  SidebarGroupHeader,
   SidebarQuietRow,
   SidebarShelfHeader,
   type ChatRowAction,
@@ -145,6 +146,36 @@ const buildStateOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>
 };
 const NO_BUILD_STATE = { broken: false, brokenBy: "" };
 
+/**
+ * The newest build a chat's own turns made, as its row's quiet second line says it: "Build 4 ·
+ * 3 files". One selector per chat, so the query hook sees a stable function across renders.
+ */
+const buildLineSelectors = new Map<
+  string,
+  (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => string | null
+>();
+const buildLineOf = (chatId: string) => {
+  const known = buildLineSelectors.get(chatId);
+  if (known !== undefined) return known;
+  const select = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+    if (!AsyncResult.isSuccess(result)) return null;
+    const own = result.value.builds.find(
+      (build) =>
+        build.number !== null &&
+        "threadId" in build.source &&
+        String(build.source.threadId) === chatId,
+    );
+    if (own === undefined || own.number === null) return null;
+    const files =
+      own.fileCount === null || own.fileCount === 0
+        ? ""
+        : ` · ${own.fileCount} ${own.fileCount === 1 ? "file" : "files"}`;
+    return `Build ${own.number}${files}`;
+  };
+  buildLineSelectors.set(chatId, select);
+  return select;
+};
+
 export default function Sidebar() {
   const gameLibrary = useGameLibrary();
   const shellsLive = useAtomValue(allReachableShellsLiveAtom);
@@ -191,8 +222,25 @@ export default function Sidebar() {
   });
   const keyOf = (chat: Pick<SidebarThreadSummary, "environmentId" | "id">) =>
     scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id));
-  // The rows at work, top to bottom: what the keys walk and what settling moves on through.
-  const atWork = [...list.pinned, ...list.active];
+  // The rows at work, grouped by what they need: an answer from the person, then a turn or the
+  // game's own work running, then the rest by recency. Top to bottom, the groups are what the
+  // keys walk and what settling moves on through.
+  const statusOf = (row: Row): "needs" | "working" | "recent" => {
+    const mark = chatMark(row.chat);
+    if (mark === "waiting") return "needs";
+    if (mark === "working") return "working";
+    const gameAtWork =
+      row.chat.id === row.opens.id &&
+      (row.game.run !== null || row.game.operation?.state === "running");
+    return gameAtWork ? "working" : "recent";
+  };
+  const atWorkRows = [...list.pinned, ...list.active];
+  const groups = {
+    needs: atWorkRows.filter((row) => statusOf(row) === "needs"),
+    working: atWorkRows.filter((row) => statusOf(row) === "working"),
+    recent: atWorkRows.filter((row) => statusOf(row) === "recent"),
+  };
+  const atWork = [...groups.needs, ...groups.working, ...groups.recent];
   const rowByKey = new Map(
     [...atWork, ...list.settled, ...list.archived].map((row) => [keyOf(row.chat), row] as const),
   );
@@ -559,9 +607,24 @@ export default function Sidebar() {
               onKeyDown={onListKeyDown}
               className="flex flex-col gap-1"
             >
-              {atWork.map((row) => renderRow(row, "list"))}
+              {(
+                [
+                  ["needs", "Needs you"],
+                  ["working", "Working"],
+                  ["recent", "Recent"],
+                ] as const
+              ).map(([key, label]) =>
+                groups[key].length === 0 ? null : (
+                  <li key={key} className="list-none not-first:mt-3">
+                    <SidebarGroupHeader label={label} count={groups[key].length} />
+                    <ul className="flex flex-col">
+                      {groups[key].map((row) => renderRow(row, "list"))}
+                    </ul>
+                  </li>
+                ),
+              )}
               {list.settled.length > 0 || draggingSettles ? (
-                <li className="mt-4 list-none">
+                <li className="mt-3 list-none">
                   <SettledShelfHeader
                     count={list.settled.length}
                     expanded={shelfOpen}
@@ -726,6 +789,15 @@ function ChatRow({
 }) {
   const { chat, game, opens } = row;
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(active);
+  const buildLine = useEnvironmentQuerySelector(
+    !leaseLiveStatus
+      ? null
+      : gameEnvironment.builds({
+          environmentId: game.environmentId,
+          input: { threadId: opens.id },
+        }),
+    buildLineOf(String(chat.id)),
+  );
   const name = useGameName(game.environmentId, game.projectId, game.name);
   const builds = useEnvironmentQuerySelector(
     !leaseLiveStatus || place !== "list"
@@ -776,6 +848,7 @@ function ChatRow({
           />
         }
         game={name}
+        detail={buildLine ?? null}
         title={title}
         time={
           <ChatTime
