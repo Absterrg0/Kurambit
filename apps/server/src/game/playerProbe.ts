@@ -11,6 +11,8 @@ import { openWebPlaySession, type WebPlaySession } from "./webPlaySession.ts";
 
 /** How long a press may take to start play before the next kind of press is tried. */
 const PRESS_WAIT_MS = 1_500;
+/** How long a player looks at the end screen before pressing to go again. */
+const END_READ_MS = 1_000;
 /** DESIGN-RECIPES: the text wall is read from opening through this much play. */
 const WALL_PLAY_MS = 10_000;
 /** The no-input run: a loss within this much game time is "can be lost early". */
@@ -346,8 +348,13 @@ const probe = async (
       frame = not(why);
     } else {
       await session.input({ held: [], taps: ["Escape"], clicks: [] });
-      await sleep(400);
-      pause = (await state())?.state === "paused";
+      // The press lands on the game's next frame, which on a slow machine can be most of a
+      // second away: the probe waits for it as it waits for a start, never one fixed beat.
+      pause = false;
+      for (let waited = 0; waited < PRESS_WAIT_MS && !pause; waited += 100) {
+        pause = (await state())?.state === "paused";
+        if (!pause) await sleep(100);
+      }
       for (const key of ["Escape", "KeyP", "Enter"]) {
         if ((await state())?.state !== "paused") break;
         await session.input({ held: [], taps: [key], clicks: [] });
@@ -384,6 +391,9 @@ const probe = async (
       lost = outcome !== null && !outcome.won;
       if (outcome !== null) idleEnded = { won: outcome.won, at: outcome.seconds };
       if (lost) {
+        // A person reads the end screen before pressing: an end screen that ignores keys for its
+        // first moment (so a key held through the loss does not restart) is not a missed press.
+        await sleep(END_READ_MS);
         const back = await pressUntilPlaying([
           { by: "Enter", tap: "Enter" },
           { by: "Space", tap: "Space" },
