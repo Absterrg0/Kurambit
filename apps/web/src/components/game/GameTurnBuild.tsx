@@ -89,7 +89,8 @@ export function GameTurnBuild({
         <Button
           size="xs"
           variant="ghost-muted"
-          className="min-w-0"
+          // The one part that gives way in a narrow lane, so the files and Undo stay in reach.
+          className="min-w-0 shrink"
           disabled={!build.available}
           onClick={() => {
             useGameWorkspaceStore.getState().inspectBuild({
