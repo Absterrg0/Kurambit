@@ -91,6 +91,7 @@ import * as Equal from "effect/Equal";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
@@ -1241,6 +1242,8 @@ type ShellThreadRow = {
   readonly latest_user_message_at: string | null;
   readonly latest_user_authored_message_at: string | null;
   readonly has_actionable_proposed_plan: number;
+  /** A one-element JSON array of the latest file-changing turn's line counts, or "[]". */
+  readonly latest_turn_diff_json: string | null;
   readonly item_count: number;
   readonly runless_item_count: number;
 };
@@ -1781,6 +1784,7 @@ export function threadShellFromProjection(
       projection.providerThreads,
       projection.thread.activeProviderThreadId,
     ),
+    latestTurnDiff: latestTurnDiffOf(projection.checkpoints),
     itemCount: activeLocalTurnItems(projection).length,
     visibleItemCount: projection.visibleTurnItems.length,
     createdAt: projection.thread.createdAt,
@@ -1801,6 +1805,39 @@ export function threadShellFromProjection(
     deletedAt: projection.thread.deletedAt,
   };
 }
+
+/**
+ * The newest ready turn checkpoint that changed files, as lines added and removed: what a
+ * chat's sidebar row says its latest turn did. Null when no turn has changed a file.
+ */
+function latestTurnDiffOf(
+  checkpoints: OrchestrationV2ThreadProjection["checkpoints"],
+): OrchestrationV2ThreadShell["latestTurnDiff"] {
+  const latest = checkpoints
+    .filter((checkpoint) => checkpoint.runId !== null && checkpoint.status === "ready")
+    .filter((checkpoint) => checkpoint.files.length > 0)
+    .toSorted(
+      (left, right) =>
+        DateTime.toEpochMillis(right.capturedAt) - DateTime.toEpochMillis(left.capturedAt),
+    )[0];
+  if (latest === undefined) return null;
+  return {
+    additions: latest.files.reduce((sum, file) => sum + file.additions, 0),
+    deletions: latest.files.reduce((sum, file) => sum + file.deletions, 0),
+  };
+}
+
+const LatestTurnDiffRows = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ additions: Schema.Number, deletions: Schema.Number })),
+);
+const decodeLatestTurnDiffRows = Schema.decodeUnknownOption(LatestTurnDiffRows);
+const decodeLatestTurnDiff = (
+  json: string | null,
+): OrchestrationV2ThreadShell["latestTurnDiff"] => {
+  if (json === null) return null;
+  const first = Option.getOrNull(decodeLatestTurnDiffRows(json))?.[0];
+  return first === undefined ? null : { additions: first.additions, deletions: first.deletions };
+};
 
 function providerInstanceHistoryForShell(input: {
   readonly threadId: ThreadId;
@@ -1864,6 +1901,7 @@ type ShellThreadState = {
   readonly pendingBackgroundTasks: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
   readonly providerInstanceHistory: OrchestrationV2ThreadShell["providerInstanceHistory"];
   readonly goal: OrchestrationV2ThreadShell["goal"];
+  readonly latestTurnDiff: OrchestrationV2ThreadShell["latestTurnDiff"];
   readonly itemCount: number;
   readonly runlessItemCount: number;
   readonly updatedAt: OrchestrationV2ThreadProjection["updatedAt"];
@@ -2025,6 +2063,7 @@ function shellFromState(input: {
     pendingBackgroundTasks: input.state.pendingBackgroundTasks,
     providerInstanceHistory: input.state.providerInstanceHistory,
     goal: input.state.goal,
+    latestTurnDiff: input.state.latestTurnDiff ?? null,
     itemCount: input.state.itemCount,
     visibleItemCount: input.visibleItemCount,
     createdAt: input.state.thread.createdAt,
@@ -5895,6 +5934,25 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND plan.kind = 'proposed_plan'
                   AND plan.status = 'active'
               ) AS has_actionable_proposed_plan,
+              (
+                SELECT json_group_array(
+                  json_object('additions', COALESCE(f.additions, 0), 'deletions', COALESCE(f.deletions, 0))
+                )
+                FROM (
+                  SELECT
+                    (SELECT SUM(json_extract(file.value, '$.additions'))
+                      FROM json_each(c.payload_json, '$.files') file) AS additions,
+                    (SELECT SUM(json_extract(file.value, '$.deletions'))
+                      FROM json_each(c.payload_json, '$.files') file) AS deletions
+                  FROM orchestration_v2_projection_checkpoints c
+                  WHERE c.thread_id = t.thread_id
+                    AND c.run_id IS NOT NULL
+                    AND c.status = 'ready'
+                    AND json_array_length(c.payload_json, '$.files') > 0
+                  ORDER BY c.captured_at DESC
+                  LIMIT 1
+                ) f
+              ) AS latest_turn_diff_json,
               -- Count per run on the covering (thread_id, run_id) index, then
               -- look up each run once, instead of one run lookup per item.
               (
@@ -6373,6 +6431,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ? null
               : DateTime.makeUnsafe(row.latest_user_authored_message_at),
           hasActionableProposedPlan: row.has_actionable_proposed_plan === 1,
+          latestTurnDiff: decodeLatestTurnDiff(row.latest_turn_diff_json),
           pendingBackgroundTasks,
           providerInstanceHistory: providerInstanceHistoryForShell({
             threadId: thread.id,

@@ -11,6 +11,9 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   operation: null,
   run: null,
   keyArt: null,
+  buildCount: 0,
+  latestBuildAt: null,
+  published: null,
   updatedAt,
 });
 

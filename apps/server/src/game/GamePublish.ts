@@ -23,11 +23,11 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GameExport from "./GameExport.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { hashWebBuild } from "./webBuild.ts";
+import { PUBLISHED_FILE, readPublished } from "./publishedRecord.ts";
 
 /** kurambit.com, where the Connect page and the publish functions live. */
 const SITE = process.env["KURAMBIT_PUBLISH_SITE"] ?? "https://kurambit.com";
 const KEY_SECRET = "game-publish-key";
-const PUBLISHED_FILE = ".studio/published.json";
 const UPLOADS_AT_ONCE = 4;
 
 const Connection = Schema.Struct({ key: Schema.String, login: Schema.NullOr(Schema.String) });
@@ -46,8 +46,6 @@ const DevicePoll = Schema.Struct({
   login: Schema.optional(Schema.NullOr(Schema.String)),
 });
 const decodeDevicePoll = Schema.decodeUnknownOption(DevicePoll);
-const Published = Schema.Struct({ slug: Schema.String, url: Schema.String });
-const decodePublished = Schema.decodeUnknownOption(Schema.fromJsonString(Published));
 
 const failed = (operation: string, path: string, detail: string, cause?: unknown) =>
   new GameOperationError({
@@ -104,13 +102,7 @@ const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
 
-  const publishedOf = (root: string) =>
-    Effect.promise(() =>
-      NodeFSP.readFile(NodePath.join(root, PUBLISHED_FILE), "utf8").then(
-        (text) => Option.getOrNull(decodePublished(text)),
-        () => null,
-      ),
-    );
+  const publishedOf = readPublished;
 
   const statusOf = (root: string) =>
     Effect.gen(function* () {

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "../../lib/utils";
+import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
 import { Button } from "../ui/button";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Spinner } from "../ui/spinner";
@@ -94,6 +95,7 @@ export function SidebarChatRow({
   pigment,
   game,
   detail = null,
+  diff = null,
   title,
   time,
   active,
@@ -114,8 +116,10 @@ export function SidebarChatRow({
   /** The game's pigment: the open chat's row takes a soft tint and a thin edge in it. */
   pigment: string;
   game: string;
-  /** Quiet facts after the game's name: the newest build this chat made and its files. */
+  /** Quiet facts after the game's name: the newest build this chat made. */
   detail?: string | null;
+  /** Lines its latest file-changing turn added and removed. */
+  diff?: { readonly additions: number; readonly deletions: number } | null;
   title: string;
   time: ReactNode;
   /** The chat on screen. */
@@ -192,6 +196,11 @@ export function SidebarChatRow({
         {detail === null ? null : (
           <Text variant="meta" tone="dim" numeric render={<span className="shrink-0" />}>
             · {detail}
+          </Text>
+        )}
+        {diff === null || !hasNonZeroStat(diff) ? null : (
+          <Text variant="meta" tone="dim" render={<span className="ms-auto shrink-0" />}>
+            <DiffStatLabel additions={diff.additions} deletions={diff.deletions} layout="inline" />
           </Text>
         )}
       </span>

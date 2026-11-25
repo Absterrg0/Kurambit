@@ -63,6 +63,6 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
     return line("Does not start", "broken", { at: input.build.at });
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
   if (!input.known) return line("", "pending");
-  // A game opened from a folder plays before Kurambit has measured any build of it.
-  return line("Not measured yet", "idle");
+  // No build yet: a new game before its first turn lands, or a folder opened as it is.
+  return line("No builds yet", "idle");
 };

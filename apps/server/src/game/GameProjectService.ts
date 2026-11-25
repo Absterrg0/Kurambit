@@ -49,6 +49,7 @@ import { stepNumber } from "../orchestration-v2/gameRun/decide.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
+import { readPublished } from "./publishedRecord.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { gameRelative } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
@@ -868,6 +869,16 @@ const make = Effect.gen(function* () {
             const keyArt = yield* Effect.promise(() =>
               findKeyArt(root, manifest.value.project, manifest.value.engine.name),
             );
+            // The library card's facts: how many builds the game has had and when the last one
+            // landed (the tally's highest number counts every numbered build, copies included),
+            // and where it is published.
+            const tally = yield* projections
+              .getGameBuildTally(project.id)
+              .pipe(Effect.orElseSucceed(() => ({ number: 0, parks: 0 })));
+            const latestBuild = yield* projections
+              .listGameBuilds(project.id, { root, limit: 1 })
+              .pipe(Effect.orElseSucceed(() => []));
+            const published = yield* readPublished(root);
             const summary: GameSummary = {
               projectId: project.id,
               root,
@@ -881,6 +892,9 @@ const make = Effect.gen(function* () {
                   : { name: currentOperation.name, state: currentOperation.state },
               run: yield* liveRun(project.id),
               keyArt,
+              buildCount: tally.number,
+              latestBuildAt: latestBuild[0]?.at ?? null,
+              published,
               updatedAt: latestGameActivity(
                 project.updatedAt,
                 latestThread === null ? null : DateTime.formatIso(latestThread.updatedAt),

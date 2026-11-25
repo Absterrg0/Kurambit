@@ -2000,6 +2000,10 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   goal: Schema.optional(Schema.NullOr(OrchestrationV2ProviderGoal)),
+  /** Lines added and removed by the chat's latest turn that changed files; null when none has. */
+  latestTurnDiff: Schema.optional(
+    Schema.NullOr(Schema.Struct({ additions: NonNegativeInt, deletions: NonNegativeInt })),
+  ),
   itemCount: NonNegativeInt,
   visibleItemCount: NonNegativeInt,
   createdAt: Schema.DateTimeUtc,

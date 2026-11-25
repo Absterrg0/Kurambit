@@ -147,8 +147,8 @@ const buildStateOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>
 const NO_BUILD_STATE = { broken: false, brokenBy: "" };
 
 /**
- * The newest build a chat's own turns made, as its row's quiet second line says it: "Build 4 ·
- * 3 files". One selector per chat, so the query hook sees a stable function across renders.
+ * The newest build a chat's own turns made, as its row's quiet second line says it: "Build 4".
+ * One selector per chat, so the query hook sees a stable function across renders.
  */
 const buildLineSelectors = new Map<
   string,
@@ -166,11 +166,7 @@ const buildLineOf = (chatId: string) => {
         String(build.source.threadId) === chatId,
     );
     if (own === undefined || own.number === null) return null;
-    const files =
-      own.fileCount === null || own.fileCount === 0
-        ? ""
-        : ` · ${own.fileCount} ${own.fileCount === 1 ? "file" : "files"}`;
-    return `Build ${own.number}${files}`;
+    return `Build ${own.number}`;
   };
   buildLineSelectors.set(chatId, select);
   return select;
@@ -849,6 +845,7 @@ function ChatRow({
         }
         game={name}
         detail={buildLine ?? null}
+        diff={chat.source.latestTurnDiff ?? null}
         title={title}
         time={
           <ChatTime

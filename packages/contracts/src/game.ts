@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { RuntimeMode } from "./providerPolicy.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { PositiveInt, ProjectId, ThreadId } from "./baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
@@ -697,6 +697,12 @@ export const GameSummary = Schema.Struct({
   run: Schema.NullOr(Schema.Struct({ step: Schema.String, startedAt: Schema.String })),
   /** The game's key art, relative to `root`, for the library card; null when none exists yet. */
   keyArt: Schema.NullOr(Schema.String),
+  /** How many numbered builds the game has had, its copies' included. */
+  buildCount: NonNegativeInt,
+  /** When its newest build landed; null before the first. */
+  latestBuildAt: Schema.NullOr(Schema.String),
+  /** Where it is published on kurambit.com; null when it is not. */
+  published: Schema.NullOr(Schema.Struct({ slug: Schema.String, url: Schema.String })),
   updatedAt: Schema.String,
 });
 export type GameSummary = typeof GameSummary.Type;

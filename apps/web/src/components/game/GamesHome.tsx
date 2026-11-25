@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { AsyncResult } from "effect/reactivity";
 import {
   scopedThreadKey,
   scopeProjectRef,
@@ -14,7 +13,6 @@ import {
   GAME_STYLE_DEFAULT_LIBRARY,
   type EnvironmentId,
   type GameCharacterRoute,
-  type GamePublishStatus,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -40,7 +38,6 @@ import { cn } from "../../lib/utils";
 import { waitForThreadShell } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
-import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -677,21 +674,11 @@ function ContinueShelf({
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
   const [all, setAll] = useState(false);
   const [filter, setFilter] = useState<ShelfFilter>("all");
-  // Which games are on kurambit.com: each card reads its own publish status and says so here.
-  const [published, setPublished] = useState<ReadonlySet<string>>(() => new Set());
-  const onPublished = (projectId: string, on: boolean) =>
-    setPublished((current) => {
-      if (current.has(projectId) === on) return current;
-      const next = new Set(current);
-      if (on) next.add(projectId);
-      else next.delete(projectId);
-      return next;
-    });
   const active = covers.filter((cover) => !cover.archived);
   const groups: Record<ShelfFilter, ReadonlyArray<GameCover>> = {
     all: active,
     working: active.filter(isWorking),
-    published: active.filter((cover) => published.has(cover.game.projectId)),
+    published: active.filter((cover) => cover.game.published !== null),
     archived: covers.filter((cover) => cover.archived),
   };
   const labels: Record<ShelfFilter, string> = {
@@ -728,12 +715,7 @@ function ContinueShelf({
       </div>
       <ul role="list" className="grid grid-cols-2 gap-x-5 gap-y-7 @3xl:grid-cols-3">
         {shown.map((cover) => (
-          <GameCard
-            key={cover.game.projectId}
-            cover={cover}
-            onOpen={() => onOpen(cover)}
-            onPublished={onPublished}
-          />
+          <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
         ))}
       </ul>
       {list.length > shown.length ? (
@@ -747,34 +729,9 @@ function ContinueShelf({
   );
 }
 
-const publishedOf = (result: AsyncResult.AsyncResult<GamePublishStatus, unknown>) =>
-  AsyncResult.isSuccess(result) ? result.value.published : null;
-
-function GameCard({
-  cover,
-  onOpen,
-  onPublished,
-}: {
-  cover: GameCover;
-  onOpen: () => void;
-  onPublished: (projectId: string, on: boolean) => void;
-}) {
+function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
   const { game } = cover;
-  // Where it is published on kurambit.com, read through the chat it opens to.
-  const publishedAt = useEnvironmentQuerySelector(
-    !leaseLiveStatus || cover.opens === null
-      ? null
-      : gameEnvironment.publishStatus({
-          environmentId: cover.opens.environmentId,
-          input: { threadId: cover.opens.id },
-        }),
-    publishedOf,
-  );
-  const isPublished = publishedAt != null;
-  useEffect(() => {
-    onPublished(game.projectId, isPublished);
-  }, [game.projectId, isPublished, onPublished]);
   const { status, build, still } = useGameLibraryLine({
     game,
     opens: cover.opens,
@@ -788,7 +745,7 @@ function GameCard({
         ? { tone: "danger" as const, label: "Failed" }
         : status.tone === "broken"
           ? { tone: "danger" as const, label: "Does not start" }
-          : isPublished
+          : game.published !== null
             ? { tone: "success" as const, label: "Published" }
             : null;
   const name = useGameName(game.environmentId, game.projectId, game.name);
@@ -880,10 +837,21 @@ function GameCard({
             <Text variant="label" tone="strong" truncate>
               {name}
             </Text>
-            {/* Its latest build and when, or when it last moved while it has none yet. */}
-            {making ? null : (
+            {/* At work, what is being made; otherwise how many builds and when the last one
+                landed (or when the game last moved, before its first). */}
+            {making ? null : status.tone === "live" ? (
+              <GameLibraryStatusText status={status} />
+            ) : (
               <GameLibraryStatusText
-                status={{ ...status, at: status.at ?? cover.opens?.updatedAt ?? game.updatedAt }}
+                status={{
+                  text:
+                    game.buildCount === 0
+                      ? "No builds yet"
+                      : `${game.buildCount} ${game.buildCount === 1 ? "build" : "builds"}`,
+                  tone: status.tone === "failed" || status.tone === "broken" ? status.tone : "idle",
+                  since: null,
+                  at: game.latestBuildAt ?? cover.opens?.updatedAt ?? game.updatedAt,
+                }}
               />
             )}
             <CoverSummary build={build} status={status.text} />
