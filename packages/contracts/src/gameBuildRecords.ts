@@ -108,8 +108,6 @@ export const GameBuildFolder = Schema.Struct({
   current: Schema.NullOr(GameBuildId),
   restore: Schema.NullOr(GameBuildRestore),
   held: Schema.Array(GameBuildHeldKeep),
-  /** The legacy refs and files were read into records (once). */
-  migrated: Schema.Boolean,
 });
 export type GameBuildFolder = typeof GameBuildFolder.Type;
 
@@ -146,7 +144,7 @@ export const GameBuildEventPayloads = {
     /** The build the folder holds again; null leaves it as it was. */
     current: Schema.NullOr(GameBuildId),
   }),
-  /** The folder's legacy builds were read in; `current` and `restore` as they read. */
+  /** An earlier server's one-time read-in of a folder's builds; applied still, on replay. */
   migrated: Schema.Struct({
     ...FolderFields,
     current: Schema.NullOr(GameBuildId),
@@ -206,16 +204,6 @@ export const OrchestrationV2GameBuildCommand = Schema.Union([
     ...FolderFields,
     keep: Schema.NullOr(GameBuildHeldKeep),
     drop: Schema.NullOr(Schema.String),
-  }),
-  /** The legacy builds of one folder read in, oldest first, numbered as the old reader numbered them. */
-  Schema.Struct({
-    type: Schema.Literal("game-build.migrate"),
-    ...GameBuildCommandFields,
-    ...FolderFields,
-    builds: Schema.Array(GameBuildRecord),
-    current: Schema.NullOr(GameBuildId),
-    restore: Schema.NullOr(GameBuildRestore),
-    held: Schema.Array(GameBuildHeldKeep),
   }),
 ]);
 export type OrchestrationV2GameBuildCommand = typeof OrchestrationV2GameBuildCommand.Type;

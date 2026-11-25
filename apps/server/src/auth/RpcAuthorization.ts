@@ -120,7 +120,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.gameSavedPlay]: AuthOrchestrationReadScope,
   [WS_METHODS.gameDecisions]: AuthOrchestrationReadScope,
   [WS_METHODS.gameBuilds]: AuthOrchestrationReadScope,
-  [WS_METHODS.gameTries]: AuthOrchestrationReadScope,
   [WS_METHODS.gameCopies]: AuthOrchestrationReadScope,
   [WS_METHODS.gameBuildCompare]: AuthOrchestrationReadScope,
   [WS_METHODS.gameBuildFacts]: AuthOrchestrationReadScope,

@@ -33,8 +33,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameCopyUpdate]: "game",
   [WS_METHODS.gameCopyThrowAway]: "game",
   [WS_METHODS.gameRunInCopy]: "game",
-  [WS_METHODS.gameTries]: "game",
-  [WS_METHODS.gameKeepVersion]: "game",
   [WS_METHODS.gameBuildStop]: "game",
   [WS_METHODS.gameKeepValues]: "game",
   [WS_METHODS.gameKeepPlay]: "game",

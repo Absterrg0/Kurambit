@@ -19,7 +19,6 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeCrypto from "node:crypto";
 import {
   CheckpointRef,
@@ -44,7 +43,6 @@ import {
   type GameBuildsResult,
   type GameEngineName,
   isAvailableEngine,
-  GameKeepValuesInput as GameKeepValuesInputSchema,
   type GameKeepValuesInput,
   type GameKeepValuesResult,
   gameLookId,
@@ -57,9 +55,7 @@ import {
   RunId,
   ThreadId,
 } from "@kurambit/contracts";
-import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
-import * as ServerConfig from "../config.ts";
 import { threadRefKey, worktreeSeedRef } from "../checkpointing/worktreeSeed.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
@@ -90,48 +86,11 @@ import { replaceComposerContextReferences } from "@kurambit/shared/composerConte
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
 import { sameTuneFile, tuneChanges, tuneFileText, tuneFileWith } from "./gameTune.ts";
 import { mergeBuilds } from "./mergeBuilds.ts";
-import { readTry, triesInRefs } from "./gameTries.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
-/**
- * Each turn build's base as it was when the turn landed, one ref per build
- * (`bases/<build>` pointing at the base), the way T3 records a checkpoint: a
- * base read later from the latest restore alone would be wrong once a second
- * restore replaced the first. The refs also keep every base restorable.
- */
-const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
-/**
- * A turn folded into the build before it, as a fix of that build (`fixes/<build>`, pointing at
- * the build itself): it keeps that build's number. Earlier servers wrote these from what the agent
- * declared; they are still read, and no longer written.
- */
-const FIXES = `${gameRunRefsFolder(NO_RUN)}fixes/`;
-/**
- * A person's edit kept as a build outside a turn (the Stage's Keep as a
- * build): `edits/<request>-values` is the build, `edits/<request>-from` the
- * folder just before it, which restoring undoes it to.
- */
-const EDITS = "edits/";
-/**
- * Where the folder stood once an earlier Kurambit's keep going wrote its play
- * bot as setup (`bots/<run>`), with the build it was written on (`-from`,
- * written last, so a setup point counts only once it is whole). Still read so
- * those games list as before: it is no build of the rail, which names the
- * build it was written on.
- */
-const BOTS = `${gameRunRefsFolder(NO_RUN)}bots/`;
 const VALUES_LABEL = "Tuned";
-/** A Library add kept as a build: `edits/<request>-library`, beside its `-from`. */
-const LIBRARY_SUFFIX = "-library";
 const LIBRARY_LABEL = "Added from the Library";
-/**
- * A build landed in the game outside a turn by a merge: `edits/<request>-in` a copy brought in,
- * `edits/<request>-undo` one build's change reversed (`-undid` names that build), each beside
- * its `-from`, the game it landed on. The commit's subject is its label.
- */
-const LANDED_SUFFIX = "-in";
-const UNDO_SUFFIX = "-undo";
 /** Where a capture lands before it is kept under its own id (keepRef). */
 const CAPTURE_REF = CheckpointRef.make("refs/kurambit/game-builds/capture");
 /** A build made outside a turn, kept reachable: the ref holds its commit and means nothing else. */
@@ -165,30 +124,6 @@ const measurable = (engine: GameEngineName) => engineCapabilities(engine).has("p
 const isGameBuildId = Schema.is(GameBuildId);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
-/** `copies/<chat key>/in|out` under the game-builds refs: when a chat moved into its copy and back. */
-const COPY_MOVE = /^copies\/([0-9a-f]+)\/(in|out)$/;
-/** Per chat key (threadRefKey), when it moved into a copy and back (unix seconds). */
-type CopyMoves = Map<string, { readonly in?: number; readonly out?: number }>;
-/**
- * Whether a turn's build was made in the folder `g` is: a thread's checkpoints all carry its
- * current folder, so a chat that moved into a copy or back is told apart by when it moved.
- */
-const madeHere = (
-  g: { readonly root: string; readonly home: string },
-  moves: CopyMoves,
-  row: {
-    readonly threadId: ThreadId;
-    readonly cwd: string | null;
-    readonly checkpoint: { readonly capturedAt: DateTime.Utc };
-  },
-) => {
-  const move = moves.size === 0 ? undefined : moves.get(threadRefKey(row.threadId));
-  if (move?.in === undefined) return row.cwd === g.root;
-  const at = DateTime.toEpochMillis(row.checkpoint.capturedAt) / 1000;
-  const inCopy = at >= move.in && (move.out === undefined || move.out < move.in || at < move.out);
-  return g.root === g.home ? !inCopy && row.cwd !== null : inCopy && row.cwd === g.root;
-};
-
 /** One build before its facts are read. */
 interface Entry {
   readonly id: GameBuildId;
@@ -211,30 +146,6 @@ interface MoveResult {
   readonly before: GameBuildId | null;
   readonly park: { readonly id: GameBuildId; readonly at: string } | null;
 }
-
-const NoRunRestore = Schema.Struct({
-  requestId: Schema.String,
-  target: GameBuildId,
-  label: Schema.String,
-  requestedAt: Schema.String,
-  before: Schema.NullOr(GameBuildId),
-  /** Restore only while the folder holds this build (keep going's undo); kept so a settle honours it. */
-  expect: Schema.optionalKey(GameBuildId),
-  /** The chat that asked, whose next turn a settle counts from the restored build too. */
-  thread: Schema.optionalKey(ThreadId),
-  outcome: Schema.NullOr(
-    Schema.Struct({
-      restored: Schema.Boolean,
-      message: Schema.String,
-      /** Absent on records written before it: read from `restored`. */
-      moved: Schema.optionalKey(Schema.Literals(["restored", "current", "moved-on", "refused"])),
-    }),
-  ),
-});
-type NoRunRestore = typeof NoRunRestore.Type;
-const NoRunRestoreJson = Schema.fromJsonString(NoRunRestore);
-const decodeNoRunRestore = Schema.decodeUnknownOption(NoRunRestoreJson);
-const encodeNoRunRestore = Schema.encodeEffect(NoRunRestoreJson);
 
 const firstLine = (text: string | null, fallback: string) => {
   // A thing the person pointed at is a link in the message: here it is its name, before the
@@ -452,58 +363,6 @@ export class GameBuilds extends Context.Service<
   }
 >()("kurambit/game/GameBuilds") {}
 
-/** A build that may be the folder's, with when it came into the folder. */
-interface Placed {
-  readonly id: string;
-  readonly at: string;
-}
-
-/** A page of turn builds, newest first, from the projection's newest-first turn rows. */
-export interface TurnPage {
-  readonly newest: Placed | null;
-  /** When the page's oldest row was captured: the next page starts below it. */
-  readonly oldest: string | null;
-  /** The page was full: older turns may follow. */
-  readonly more: boolean;
-}
-
-/**
- * The folder's current build: the newest turn build that changed game files,
- * or a later kept edit or restore target (`others`). Turns that changed only
- * notes are no builds, so the turns are read page by page however far back
- * they go. The walk ends when a page holds a build, the turns end, or a page
- * reaches back past the newest of `others` (an older turn cannot win). Each
- * page starts strictly below the last, so it always ends.
- */
-export const currentBuild = <E, R>(
-  others: ReadonlyArray<Placed>,
-  turns: (before: string | undefined) => Effect.Effect<TurnPage, E, R>,
-): Effect.Effect<string | null, E, R> =>
-  Effect.gen(function* () {
-    const newestOf = (all: ReadonlyArray<Placed>) =>
-      all.reduce<Placed | null>((best, e) => (best === null || e.at > best.at ? e : best), null);
-    const floor = newestOf(others)?.at ?? null;
-    let before: string | undefined;
-    for (;;) {
-      const page = yield* turns(before);
-      if (page.newest !== null) return newestOf([page.newest, ...others])?.id ?? null;
-      const oldest = page.oldest;
-      if (
-        !page.more ||
-        oldest === null ||
-        (floor !== null && oldest <= floor) ||
-        (before !== undefined && oldest >= before)
-      )
-        return newestOf(others)?.id ?? null;
-      before = oldest;
-    }
-  });
-
-/** Turn rows a page of the current-build walk reads. */
-const TURN_PAGE = 30;
-/** Every turn row older than a page, read to number its builds. */
-const ALL_TURNS = 1_000_000;
-
 /** A build's number, and which fix of it it is (null for the build itself). */
 interface BuildNumber {
   readonly number: number;
@@ -523,15 +382,6 @@ export const turnPending = (
   ((run.status === "interrupted" || run.status === "cancelled") &&
     run.startedAt !== null &&
     run.checkpointId === null);
-
-/**
- * A build in the game's one numbered sequence, the way a person counts what they see land: a
- * chat's turn, a keep-going step and values kept from the Stage. A restore's parked folder is
- * the game as it was, not a new build.
- */
-const isNumbered = (entry: Entry) =>
-  entry.source._tag === "turn" ||
-  (entry.source._tag === "saved" && entry.source.edit !== undefined);
 
 interface KeptChange {
   readonly label: string;
@@ -592,8 +442,6 @@ const keptSegments = (text: string) =>
     });
 
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const config = yield* ServerConfig.ServerConfig;
   const projects = yield* GameProjectService.GameProjectService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
@@ -610,8 +458,6 @@ const make = Effect.gen(function* () {
   const buildMoves = yield* GameBuildMoves.GameBuildMoves;
   // Who waits for a recorded restore's move, by request: the move runs as an outbox effect.
   const waiters = new Map<string, Deferred.Deferred<MoveResult>>();
-  // Older turns never change their builds: a page's count below it is read once per ref set.
-  const numberedCounts = new Map<string, number>();
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -646,22 +492,21 @@ const make = Effect.gen(function* () {
       readonly request?: string | undefined;
     },
   ) =>
-    ensureMigrated(threadId, g).pipe(
-      Effect.andThen(
-        engine.dispatch({
-          type: "game-build.record",
-          commandId: CommandId.make(`game-build:record:${g.projectId}:${entry.id}`),
-          threadId,
-          build: toRecord(g, entry, kind, options),
-          current: options.current,
-          ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
-        }),
-      ),
-      Effect.asVoid,
-      Effect.mapError((cause) =>
-        failed("Builds", g.root, "io", "the build could not be recorded", cause),
-      ),
-    );
+    engine
+      .dispatch({
+        type: "game-build.record",
+        commandId: CommandId.make(`game-build:record:${g.projectId}:${entry.id}`),
+        threadId,
+        build: toRecord(g, entry, kind, options),
+        current: options.current,
+        ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
+      })
+      .pipe(
+        Effect.asVoid,
+        Effect.mapError((cause) =>
+          failed("Builds", g.root, "io", "the build could not be recorded", cause),
+        ),
+      );
 
   /** A build as the records keep it; its number and park place are the decider's. */
   const toRecord = (
@@ -685,124 +530,6 @@ const make = Effect.gen(function* () {
     fileCount: entry.fileCount,
     ...(options.request === undefined ? {} : { request: options.request }),
   });
-
-  /**
-   * The one-time read of a folder's legacy builds into the records: the turn checkpoints, the
-   * suffix refs (kept edits, landings, undos, parks, fixes, bases), the restore record and the
-   * held-keep files, numbered and named as the legacy reader numbered and named them, so an old
-   * game lists the same. Nothing legacy is deleted. Every write of a build waits for it first, so
-   * a build landing during it is read in with the rest and never numbered twice.
-   */
-  const migratedFolders = new Set<string>();
-  const migrateLock = yield* KeyedLock.make<string>();
-  const ensureMigrated = (threadId: ThreadId, g: Pick<Game, "root" | "projectId">) =>
-    Effect.suspend(() => {
-      const key = `${g.projectId}\0${g.root}`;
-      if (migratedFolders.has(key)) return Effect.void;
-      return migrateLock.withLock(
-        key,
-        Effect.gen(function* () {
-          if (migratedFolders.has(key)) return;
-          const folder = yield* projections.getGameBuildFolder(g.projectId, g.root);
-          if (folder?.migrated !== true) {
-            const home = (yield* projects.home(threadId)).root;
-            yield* migrateFolder(threadId, yield* gameOf(threadId, g.root === home));
-          }
-          migratedFolders.add(key);
-        }),
-      );
-    });
-
-  const kindOf = (entry: Pick<Entry, "source">): GameBuildKind => {
-    switch (entry.source._tag) {
-      case "turn":
-        return "turn";
-      case "version":
-        return "version";
-      case "saved":
-        return entry.source.edit === "bring-in"
-          ? "bring-in"
-          : (entry.source.edit ?? "restore-before");
-    }
-  };
-
-  const migrateFolder = (threadId: ThreadId, g: Game) =>
-    Effect.gen(function* () {
-      const home = g.root === g.home;
-      const listed = yield* allEntries(g, ALL_TURNS / 3, undefined);
-      const undoneBy = new Map(
-        [...listed.refs].flatMap(([ref, oid]) =>
-          ref.endsWith(UNDO_SUFFIX)
-            ? [[oid, listed.refs.get(ref.replace(/-undo$/, "-undid"))] as const]
-            : [],
-        ),
-      );
-      // A copy's own turns, numbered on from its seat, as the copy's rail listed them.
-      const rows = home
-        ? listed.entries.map((entry) => ({ entry, number: undefined as BuildNumber | undefined }))
-        : ((yield* copyRail(threadId, g, 50, undefined))?.rows ?? [])
-            .filter((row) => row.inCopy === true)
-            .map((row) => ({
-              entry: {
-                id: row.id,
-                at: row.at,
-                source: row.source,
-                summary: row.summary,
-                files: row.files,
-                fileCount: row.fileCount,
-                base: row.base,
-              } satisfies Entry,
-              number:
-                row.number === null ? undefined : { number: row.number, fix: row.fix ?? null },
-            }));
-      const numbers = home ? yield* numbersOf(listed, listed.entries) : new Map();
-      const builds = rows
-        .toSorted((a, b) => (a.entry.at < b.entry.at ? -1 : a.entry.at > b.entry.at ? 1 : 0))
-        .map(({ entry, number }): GameBuildRecord => {
-          const numbered = number ?? numbers.get(entry.id);
-          const undid = undoneBy.get(entry.id);
-          return {
-            id: entry.id,
-            projectId: g.projectId,
-            root: g.root,
-            at: entry.at,
-            kind: kindOf(entry),
-            number: numbered?.number ?? null,
-            ...(numbered?.fix == null ? {} : { fix: numbered.fix }),
-            ...(entry.source._tag === "saved" &&
-            entry.source.nth !== undefined &&
-            entry.source.edit === undefined
-              ? { nth: entry.source.nth }
-              : {}),
-            base: entry.base !== null && isGameBuildId(entry.base) ? entry.base : null,
-            ...(undid !== undefined && isGameBuildId(undid) ? { undid } : {}),
-            source: entry.source._tag === "turn" ? { ...entry.source, step: null } : entry.source,
-            summary: entry.summary,
-            files: entry.files,
-            fileCount: entry.fileCount,
-          };
-        });
-      const legacy = yield* noRunRestoreOf(g.root);
-      const restore = legacy === null ? null : fromLegacyRestore(legacy);
-      const held = yield* heldKeepsOf(g.root);
-      yield* engine.dispatch({
-        type: "game-build.migrate",
-        commandId: CommandId.make(
-          `game-build:migrate:${g.projectId}:${NodeCrypto.createHash("sha256").update(g.root).digest("hex").slice(0, 24)}`,
-        ),
-        threadId,
-        projectId: g.projectId,
-        root: g.root,
-        builds,
-        current: shownAs(listed, yield* currentOf(g, listed)),
-        restore,
-        held,
-      });
-      yield* Effect.logInfo("A game's builds were read into its records.", {
-        root: g.root,
-        builds: builds.length,
-      });
-    });
 
   /** A build made outside a turn, as the rail lists it: its change counted from its base. */
   const savedEntry = (
@@ -938,126 +665,6 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  /**
-   * The turn checkpoints, each a build listing only its own turn's changes.
-   * T3 diffs a turn's checkpoint against its thread's previous one, so a turn
-   * after the run (or another chat) changed the folder would list that work as
-   * its own: the base is the newest build of the game captured before the turn
-   * began.
-   */
-  const turnEntries = (
-    g: Game,
-    refs: ReadonlyMap<string, string>,
-    limit: number,
-    before: string | undefined,
-    saved: ReadonlyArray<Entry>,
-    recorded: ReadonlyMap<string, string>,
-    setups: ReadonlyArray<Placed>,
-    moves: CopyMoves,
-  ) =>
-    Effect.gen(function* () {
-      const rows = yield* projections
-        .listProjectTurnCheckpoints(g.projectId, { limit, before })
-        .pipe(
-          Effect.mapError((cause) =>
-            failed("Builds", g.root, "io", "the game's turns could not be read", cause),
-          ),
-        );
-      const restored = isRestored(g.lane);
-      const inGame = yield* gamePaths(g.root);
-      const steps = yield* stepsOf(new Set(rows.map((row) => row.threadId)));
-      const noRun = yield* noRunRestoreOf(g.root);
-      const restoreTargets =
-        noRun?.outcome?.restored === true ? [{ id: noRun.target, at: noRun.requestedAt }] : [];
-      // A restore's "before" can be a build listed in its own right (a turn's,
-      // a kept edit), so only the park's own entry is left out.
-      const restoreBefore = (e: Entry) =>
-        e.source._tag === "saved" && e.source.label === RESTORE_BEFORE_LABEL;
-      const captures = rows.flatMap((row) => {
-        const oid = refs.get(row.checkpoint.ref);
-        return !madeHere(g, moves, row) || oid === undefined || !isGameBuildId(oid)
-          ? []
-          : [{ row, oid, at: DateTime.formatIso(row.checkpoint.capturedAt) }];
-      });
-      // Every build captured before a turn began, its thread's own turns among them.
-      const earlier: ReadonlyArray<EarlierBuild> = [
-        ...captures.map((c) => ({
-          id: c.oid,
-          at: c.at,
-          thread: c.row.threadId,
-          turn: c.row.runOrdinal,
-        })),
-        // A build with no known time (EPOCH) is never taken as what came just
-        // before a turn, nor is a restore's "before": the folder became the
-        // restore's target then, which stands in for it at that time.
-        ...saved.flatMap((e) =>
-          e.at === EPOCH || restoreBefore(e)
-            ? []
-            : [{ id: e.id, at: e.at, thread: null, turn: null }],
-        ),
-        ...restoreTargets.map((t) => ({ id: t.id, at: t.at, thread: null, turn: null })),
-        ...setups.map((t) => ({ id: t.id, at: t.at, thread: null, turn: null })),
-      ];
-      const entries = yield* Effect.forEach(captures, ({ row, oid, at }) =>
-        Effect.gen(function* () {
-          const startedAt = row.startedAt;
-          // The base recorded as the turn landed, else what the builds read now say.
-          const base =
-            recorded.get(oid) ??
-            turnChangeBase(
-              { id: oid, startedAt, thread: row.threadId, turn: row.runOrdinal },
-              earlier,
-            );
-          // T3's own base: the thread's checkpoint before this one, which for
-          // turn 1 is the thread's start (ordinal 0, captured as it began).
-          const ordinal = row.checkpoint.ordinalWithinScope;
-          const t3Base =
-            ordinal === 0
-              ? null
-              : (refs.get(
-                  yield* checkpointRefForScopeOrdinal({
-                    scopeId: row.checkpoint.scopeId,
-                    ordinalWithinScope: ordinal - 1,
-                  }).pipe(Effect.provideService(Crypto.Crypto, crypto)),
-                ) ?? null);
-          const t3Files = row.checkpoint.files.flatMap((file) => {
-            const path = inGame(file.path);
-            return path !== null && restored(path) ? [{ ...file, path }] : [];
-          });
-          const change =
-            base === null || base === t3Base
-              ? { files: topFiles(t3Files), count: t3Files.length }
-              : yield* changeOf(g.root, g.lane, base, oid);
-          if (change.count === 0) return [];
-          return [
-            {
-              id: oid,
-              at,
-              source: {
-                _tag: "turn",
-                threadId: row.threadId,
-                threadTitle: row.threadTitle,
-                turn: row.runOrdinal,
-                runId: row.runId,
-                request: firstLine(row.request, "(no request text)"),
-                step: steps.get(row.runId) ?? null,
-              },
-              summary: firstLine(row.request, "A turn's changes"),
-              files: change.files,
-              fileCount: change.count,
-              base: base ?? t3Base,
-            } satisfies Entry,
-          ];
-        }),
-      );
-      return {
-        scanned: rows.length,
-        oldest:
-          rows.at(-1) === undefined ? null : DateTime.formatIso(rows.at(-1)!.checkpoint.capturedAt),
-        entries: entries.flat(),
-      };
-    });
-
   /** A build's change from the build before it, or not counted (null) when there is none or its diff cannot be read. */
   const changeOf = (root: string, lane: string, from: string | null, to: string) =>
     Effect.gen(function* () {
@@ -1083,338 +690,6 @@ const make = Effect.gen(function* () {
       if (roundFiles.size > 500) roundFiles.clear();
       roundFiles.set(key, change);
       return change;
-    });
-
-  /**
-   * The versions of every try of the game that have a build. They stay out of
-   * the builds a turn counts from (`saved`): the folder never held one unless it
-   * was kept, and a keep is a restore, which the turns already count from.
-   */
-  const versionEntries = (g: Game, refs: ReadonlyMap<string, string>) =>
-    Effect.gen(function* () {
-      const tries = yield* Effect.forEach(
-        triesInRefs(refs.keys()),
-        (each) =>
-          readTry(projections, refs, each.threadId, each.runId).pipe(
-            Effect.orElseSucceed(() => null),
-          ),
-        { concurrency: 4 },
-      );
-      const entries = yield* Effect.forEach(
-        tries.flatMap((read) =>
-          read === null ? [] : read.versions.map((version) => ({ read, version })),
-        ),
-        ({ read, version }) =>
-          Effect.gen(function* () {
-            if (version.build === null || !isGameBuildId(version.build)) return [];
-            const kept = read.kept?.n === version.n;
-            const change = yield* changeOf(g.root, g.lane, read.base, version.build);
-            return [
-              {
-                id: version.build,
-                // A kept version came into the folder when it was kept.
-                at: kept ? read.kept!.at : (version.capturedAt ?? read.at),
-                source: {
-                  _tag: "version",
-                  threadId: read.threadId,
-                  runId: read.runId,
-                  request: read.request === "" ? "(no request text)" : read.request,
-                  n: version.n,
-                  of: read.of,
-                  approach: version.approach,
-                  kept,
-                },
-                summary: version.approach === "" ? `Version ${version.n}` : version.approach,
-                files: change.files,
-                fileCount: change.count,
-                base: read.base,
-              } satisfies Entry,
-            ];
-          }),
-      );
-      return entries.flat();
-    });
-
-  const noRunRestoreOf = (root: string) =>
-    sql<{ readonly payload_json: string }>`
-      SELECT payload_json FROM game_build_restores WHERE root = ${root}
-    `.pipe(
-      Effect.map((rows) => {
-        const row = rows[0];
-        if (row === undefined) return null;
-        const decoded = decodeNoRunRestore(row.payload_json);
-        return Option.isSome(decoded) ? decoded.value : null;
-      }),
-      Effect.orElseSucceed(() => null),
-    );
-  /** An earlier server's restore record, as the game's records keep one. */
-  const fromLegacyRestore = (legacy: NoRunRestore): GameBuildRestore => ({
-    requestId: legacy.requestId,
-    target: legacy.target,
-    label: legacy.label,
-    requestedAt: legacy.requestedAt,
-    before: legacy.before,
-    ...(legacy.expect === undefined ? {} : { expect: legacy.expect }),
-    ...(legacy.thread === undefined ? {} : { thread: legacy.thread }),
-    outcome:
-      legacy.outcome === null
-        ? null
-        : {
-            restored: legacy.outcome.restored,
-            message: legacy.outcome.message,
-            moved: legacy.outcome.moved ?? (legacy.outcome.restored ? "restored" : "current"),
-          },
-  });
-  const saveNoRunRestore = (root: string, record: NoRunRestore) =>
-    Effect.gen(function* () {
-      const now = DateTime.formatIso(yield* DateTime.now);
-      const payload = yield* encodeNoRunRestore(record);
-      yield* sql`
-        INSERT INTO game_build_restores (root, payload_json, updated_at)
-        VALUES (${root}, ${payload}, ${now})
-        ON CONFLICT (root) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
-      `;
-    }).pipe(Effect.ignore);
-
-  // Every build of the game, newest first, from `before`; the turn page is
-  // read a little long, since turns that changed only notes are no builds.
-  const allEntries = (g: Game, limit: number, before: string | undefined) =>
-    Effect.gen(function* () {
-      const refs = yield* buildRefs(g.root);
-      const byRef = new Map(refs.map((ref) => [ref.checkpointRef as string, ref.oid]));
-      const kept = new Set(refs.map((ref) => ref.oid));
-      const noRunFolder = gameRunRefsFolder(NO_RUN);
-      // Saved builds of one kind are told apart by their place among the game's, oldest 1.
-      const nthOf = (ofKind: ReadonlyArray<{ readonly committedAt: number }>) => {
-        const order = ofKind.toSorted((a, b) => a.committedAt - b.committedAt);
-        return (ref: { readonly committedAt: number }) => order.indexOf(ref) + 1;
-      };
-      // The folder as it was before each restore, which going back to undoes it.
-      const befores = refs.filter(
-        (ref) => ref.checkpointRef.startsWith(noRunFolder) && ref.checkpointRef.endsWith("-before"),
-      );
-      const beforeNth = nthOf(befores);
-      const beforeRestores = befores.flatMap((ref): ReadonlyArray<Entry> => {
-        if (!isGameBuildId(ref.oid)) return [];
-        return [
-          {
-            id: ref.oid,
-            at: isoOfSeconds(ref.committedAt),
-            source: { _tag: "saved", label: RESTORE_BEFORE_LABEL, nth: beforeNth(ref) },
-            summary: "What the game folder held when a restore replaced it",
-            files: [],
-            fileCount: null,
-            base: null,
-          },
-        ];
-      });
-      const editsFolder = `${noRunFolder}${EDITS}`;
-      const tunings = refs.filter(
-        (ref) => ref.checkpointRef.startsWith(editsFolder) && ref.checkpointRef.endsWith("-values"),
-      );
-      const tuningNth = nthOf(tunings);
-      const edits = yield* Effect.forEach(tunings, (ref) =>
-        Effect.gen(function* () {
-          if (!isGameBuildId(ref.oid)) return [];
-          const base = byRef.get(ref.checkpointRef.replace(/-values$/, "-from")) ?? null;
-          const change = yield* changeOf(g.root, g.lane, base, ref.oid);
-          return [
-            {
-              id: ref.oid,
-              at: isoOfSeconds(ref.committedAt),
-              source: {
-                _tag: "saved",
-                label: VALUES_LABEL,
-                edit: "values",
-                nth: tuningNth(ref),
-              },
-              summary: "Values tuned on the Stage",
-              files: change.files,
-              fileCount: change.count,
-              base,
-            } satisfies Entry,
-          ];
-        }),
-      ).pipe(Effect.map((each) => each.flat()));
-      const libraryAdds = refs.filter(
-        (ref) =>
-          ref.checkpointRef.startsWith(editsFolder) && ref.checkpointRef.endsWith(LIBRARY_SUFFIX),
-      );
-      const libraryNth = nthOf(libraryAdds);
-      const added = yield* Effect.forEach(libraryAdds, (ref) =>
-        Effect.gen(function* () {
-          if (!isGameBuildId(ref.oid)) return [];
-          const base =
-            byRef.get(ref.checkpointRef.slice(0, -LIBRARY_SUFFIX.length) + "-from") ?? null;
-          const change = yield* changeOf(g.root, g.lane, base, ref.oid);
-          return [
-            {
-              id: ref.oid,
-              at: isoOfSeconds(ref.committedAt),
-              source: {
-                _tag: "saved",
-                label: LIBRARY_LABEL,
-                edit: "library",
-                nth: libraryNth(ref),
-              },
-              summary: "Added from the Library",
-              files: change.files,
-              fileCount: change.count,
-              base,
-            } satisfies Entry,
-          ];
-        }),
-      ).pipe(Effect.map((each) => each.flat()));
-      // A copy brought in or a build undone: its label is its commit's subject.
-      const landings = refs.filter(
-        (ref) =>
-          ref.checkpointRef.startsWith(editsFolder) &&
-          (ref.checkpointRef.endsWith(LANDED_SUFFIX) || ref.checkpointRef.endsWith(UNDO_SUFFIX)),
-      );
-      const landed = yield* Effect.forEach(landings, (ref) =>
-        Effect.gen(function* () {
-          if (!isGameBuildId(ref.oid)) return [];
-          const undo = ref.checkpointRef.endsWith(UNDO_SUFFIX);
-          const prefix = ref.checkpointRef.slice(0, -(undo ? UNDO_SUFFIX : LANDED_SUFFIX).length);
-          const base = byRef.get(`${prefix}-from`) ?? null;
-          const change = yield* changeOf(g.root, g.lane, base, ref.oid);
-          const entry: Entry = {
-            id: ref.oid,
-            at: isoOfSeconds(ref.committedAt),
-            source: { _tag: "saved", label: ref.subject ?? "", edit: undo ? "undo" : "bring-in" },
-            summary: ref.subject ?? "",
-            files: change.files,
-            fileCount: change.count,
-            base,
-          };
-          return [entry];
-        }),
-      ).pipe(Effect.map((each) => each.flat()));
-      const saved = [...beforeRestores, ...edits, ...added, ...landed];
-      const setups = refs.flatMap((ref) => {
-        const from = byRef.get(`${ref.checkpointRef}-from`);
-        return ref.checkpointRef.startsWith(BOTS) && from !== undefined && isGameBuildId(ref.oid)
-          ? [{ id: ref.oid, at: isoOfSeconds(ref.committedAt), from }]
-          : [];
-      });
-      const moves: CopyMoves = new Map();
-      for (const ref of refs) {
-        const move = COPY_MOVE.exec(ref.checkpointRef.slice(noRunFolder.length));
-        if (move === null) continue;
-        moves.set(move[1]!, { ...moves.get(move[1]!), [move[2]!]: ref.committedAt });
-      }
-      const recorded = new Map(
-        refs.flatMap((ref) =>
-          ref.checkpointRef.startsWith(BASES)
-            ? [[ref.checkpointRef.slice(BASES.length), ref.oid] as const]
-            : [],
-        ),
-      );
-      const fixes: ReadonlySet<string> = new Set(
-        refs.flatMap((ref) =>
-          ref.checkpointRef.startsWith(FIXES) ? [ref.checkpointRef.slice(FIXES.length)] : [],
-        ),
-      );
-      const turnPage = (rows: number, from: string | undefined) =>
-        turnEntries(g, byRef, rows, from, saved, recorded, setups, moves).pipe(
-          Effect.map((page): TurnPage => ({
-            newest: page.entries[0] ?? null,
-            oldest: page.oldest,
-            more: page.scanned === rows,
-          })),
-        );
-      const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded, setups, moves);
-      const savedPage = [...saved, ...(yield* versionEntries(g, byRef))].filter(
-        (entry) => before === undefined || entry.at < before,
-      );
-      // A saved build is also a turn's at times; one entry each, the saved one first.
-      const seen = new Set<string>();
-      const merged = [...savedPage, ...turns.entries]
-        .toSorted((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
-        .filter((entry) => (seen.has(entry.id) ? false : (seen.add(entry.id), true)));
-      // Turns past the page's last scanned turn may be newer than saved builds below it.
-      const floor = turns.scanned === limit * 3 ? turns.oldest : null;
-      const listed = floor === null ? merged : merged.filter((entry) => entry.at >= floor);
-      return {
-        entries: listed,
-        kept,
-        more: floor !== null || listed.length > limit,
-        // How many numbered builds the game has from before `at`: every older
-        // turn read, so a page's numbers never depend on what else was loaded.
-        numberedBefore: (at: string) => {
-          const key = `${g.root}\0${at}\0${refs.length}`;
-          const known = numberedCounts.get(key);
-          if (known !== undefined) return Effect.succeed(known);
-          return turnEntries(g, byRef, ALL_TURNS, at, saved, recorded, setups, moves).pipe(
-            Effect.map(({ entries }) => {
-              const ids = new Set(
-                [...entries, ...saved.filter((entry) => entry.at < at)]
-                  .filter((entry) => isNumbered(entry) && !fixes.has(entry.id))
-                  .map((entry) => entry.id),
-              );
-              if (numberedCounts.size > 200) numberedCounts.clear();
-              numberedCounts.set(key, ids.size);
-              return ids.size;
-            }),
-          );
-        },
-        refs: byRef,
-        recorded,
-        fixes,
-        saved,
-        setups,
-        // The first page as read above, then older pages of TURN_PAGE rows.
-        turns: (from: string | undefined) =>
-          from === undefined
-            ? Effect.succeed<TurnPage>({
-                newest: turns.entries[0] ?? null,
-                oldest: turns.oldest,
-                more: turns.scanned === limit * 3,
-              })
-            : turnPage(TURN_PAGE, from),
-      };
-    });
-
-  /** The folder's current build (currentBuild) over the game's turns, its newest kept edit and restore. */
-  const currentOf = (g: Game, listed: Effect.Success<ReturnType<typeof allEntries>>) =>
-    Effect.gen(function* () {
-      const restore = yield* noRunRestoreOf(g.root);
-      const edits = listed.saved.filter(
-        (entry) => entry.source._tag === "saved" && entry.source.edit !== undefined,
-      );
-      const others = [
-        ...edits.map((entry) => ({ id: entry.id, at: entry.at })),
-        ...(restore?.outcome?.restored === true
-          ? [{ id: restore.target, at: restore.requestedAt }]
-          : []),
-        ...listed.setups,
-      ];
-      const id = yield* currentBuild(others, listed.turns);
-      return id !== null && isGameBuildId(id) ? id : null;
-    });
-
-  /** Each numbered build's number among `entries`, a contiguous stretch of the game's builds. */
-  const numbersOf = (
-    listed: Effect.Success<ReturnType<typeof allEntries>>,
-    entries: ReadonlyArray<Entry>,
-  ) =>
-    Effect.gen(function* () {
-      const numbered = entries
-        .filter(isNumbered)
-        .toSorted((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-      const oldest = numbered[0];
-      if (oldest === undefined) return new Map<string, BuildNumber>();
-      let n = yield* listed.numberedBefore(oldest.at);
-      let fix = 0;
-      // A fix keeps the number of the build before it and counts as that build's next fix.
-      return new Map(
-        numbered.map((entry): readonly [string, BuildNumber] => {
-          if (listed.fixes.has(entry.id) && n > 0)
-            return [entry.id, { number: n, fix: (fix += 1) }];
-          fix = 0;
-          return [entry.id, { number: (n += 1), fix: null }];
-        }),
-      );
     });
 
   /** The content key of each build: its engine folder's tree. */
@@ -1464,55 +739,6 @@ const make = Effect.gen(function* () {
         if (there) return path;
       }
       return null;
-    });
-
-  const rowsOf = (
-    g: Game,
-    entries: ReadonlyArray<Entry>,
-    kept: ReadonlySet<string>,
-    numbers: ReadonlyMap<string, BuildNumber>,
-  ) =>
-    Effect.gen(function* () {
-      const resolved = yield* resolveOf(
-        g,
-        entries.map((entry) => entry.id),
-      );
-      const measured = yield* facts.readMany([...resolved.values()]);
-      const stills = yield* Effect.forEach(
-        entries,
-        (entry) => stillOf(g.root, measured.get(entry.id)),
-        { concurrency: 8 },
-      );
-      const builds = entries.map((entry, index): GameBuild => {
-        const available = kept.has(entry.id) && resolved.has(entry.id);
-        const read = measured.get(entry.id);
-        return {
-          id: entry.id,
-          at: entry.at,
-          source: entry.source,
-          number: numbers.get(entry.id)?.number ?? null,
-          ...(numbers.get(entry.id)?.fix == null ? {} : { fix: numbers.get(entry.id)!.fix! }),
-          name: "",
-          undone: false,
-          // Only a build still kept can be restored to undo this one.
-          base:
-            entry.base !== null && isGameBuildId(entry.base) && kept.has(entry.base)
-              ? entry.base
-              : null,
-          summary: entry.summary,
-          files: entry.files,
-          fileCount: entry.fileCount,
-          available,
-          noPlay: !available ? "This build is no longer kept." : noPlayReason(g.engine),
-          noRestore: !available ? "This build is no longer kept." : null,
-          facts:
-            read === undefined
-              ? { state: "never", chips: [], notMeasured: 0, good: 0, bad: 0 }
-              : summaryOf(read),
-          still: stills[index] ?? null,
-        };
-      });
-      return { builds, measured };
     });
 
   // The folder captured (T3's capture, its kept index makes it cheap) and its
@@ -1631,12 +857,9 @@ const make = Effect.gen(function* () {
   const readFailed = (root: string) => (cause: unknown) =>
     failed("Builds", root, "io", "the game's builds could not be read", cause);
 
-  /** A folder's state from the records, once its legacy builds are read in. */
+  /** A folder's state from the records. */
   const folderOf = (g: Pick<Game, "threadId" | "root" | "projectId">) =>
-    ensureMigrated(g.threadId, g).pipe(
-      Effect.andThen(projections.getGameBuildFolder(g.projectId, g.root)),
-      Effect.mapError(readFailed(g.root)),
-    );
+    projections.getGameBuildFolder(g.projectId, g.root).pipe(Effect.mapError(readFailed(g.root)));
   /** The build the folder holds, as the records say: its newest landing, keep or restore. */
   const folderCurrent = (g: Pick<Game, "threadId" | "root" | "projectId">) =>
     Effect.map(folderOf(g), (folder) => folder?.current ?? null);
@@ -1646,10 +869,9 @@ const make = Effect.gen(function* () {
     limit: number,
     before?: string | undefined,
   ) =>
-    ensureMigrated(g.threadId, g).pipe(
-      Effect.andThen(projections.listGameBuilds(g.projectId, { root: g.root, before, limit })),
-      Effect.mapError(readFailed(g.root)),
-    );
+    projections
+      .listGameBuilds(g.projectId, { root: g.root, before, limit })
+      .pipe(Effect.mapError(readFailed(g.root)));
   const recordOf = (g: Pick<Game, "root" | "projectId">, id: string) =>
     (isGameBuildId(id)
       ? projections.getGameBuilds(g.projectId, [id])
@@ -1759,57 +981,6 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
-  /**
-   * A chat in a copy: the game's builds up to the copy's seat, then the copy's own turns since it
-   * was made or last brought in, numbered on from the seat. One numbering, never the game's later
-   * builds, its kept edits or another chat's versions. Null for a copy with no seat kept.
-   */
-  const copyRail = (threadId: ThreadId, g: Game, limit: number, before: string | undefined) =>
-    Effect.gen(function* () {
-      const seatedAt = yield* refTime(g.home, worktreeSeedRef(threadId));
-      if (seatedAt === null) return null;
-      const home: Game = { ...g, root: g.home };
-      // The seat's own build commits within the second its ref says.
-      const upTo = isoOfSeconds(seatedAt + 1);
-      const game = yield* allEntries(home, limit, before ?? upTo);
-      const gamePage = game.entries.filter((entry) => entry.at < upTo).slice(0, limit);
-      const gameRows = yield* rowsOf(home, gamePage, game.kept, yield* numbersOf(game, gamePage));
-      if (before !== undefined)
-        return {
-          rows: gameRows.builds.map((build) => ({ ...build, inCopy: false })),
-          measured: gameRows.measured,
-          next: game.more && gamePage.length > 0 ? gamePage.at(-1)!.at : null,
-        };
-      const copiesFolder = `${gameRunRefsFolder(NO_RUN)}copies/${threadRefKey(threadId)}`;
-      const since = Math.max(
-        (yield* refTime(g.home, `${copiesFolder}/in`)) ?? 0,
-        (yield* refTime(g.home, `${copiesFolder}/brought`)) ?? 0,
-      );
-      const copy = yield* allEntries(g, 50, undefined);
-      const own = copy.entries.filter(
-        (entry) =>
-          entry.source._tag === "turn" &&
-          entry.source.threadId === threadId &&
-          entry.at > isoOfSeconds(since),
-      );
-      const seatNumber = yield* game.numberedBefore(upTo);
-      const oldestFirst = own.toSorted((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-      const numbers = new Map(
-        oldestFirst.map(
-          (entry, index) => [entry.id, { number: seatNumber + index + 1, fix: null }] as const,
-        ),
-      );
-      const copyRows = yield* rowsOf(g, own, copy.kept, numbers);
-      return {
-        rows: [
-          ...copyRows.builds.map((build) => ({ ...build, inCopy: true })),
-          ...gameRows.builds.map((build) => ({ ...build, inCopy: false })),
-        ],
-        measured: new Map([...gameRows.measured, ...copyRows.measured]),
-        next: game.more && gamePage.length > 0 ? gamePage.at(-1)!.at : null,
-      };
-    });
-
   const list: GameBuilds["Service"]["list"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId, input.home === true);
@@ -1874,15 +1045,6 @@ const make = Effect.gen(function* () {
         next,
       };
     });
-
-  /** The build the rail shows for the folder's: a bot setup's point shows as the build it was written on. */
-  const shownAs = (
-    listed: { readonly setups: ReadonlyArray<Placed & { readonly from: string }> },
-    id: GameBuildId | null,
-  ) => {
-    const from = listed.setups.find((setup) => setup.id === id)?.from;
-    return from !== undefined && isGameBuildId(from) ? from : id;
-  };
 
   /** The folder's latest restore, with the build that undoes it while no turn came since. */
   const restoreRefOf = (g: Game, folder: GameBuildFolder | null) =>
@@ -2649,11 +1811,6 @@ const make = Effect.gen(function* () {
     landing: GameBuildRecord | undefined,
   ) =>
     Effect.gen(function* () {
-      yield* ensureMigrated(threadId, g).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("A game's builds could not be read into its records.", { cause }),
-        ),
-      );
       const waiter = yield* Deferred.make<MoveResult>();
       waiters.set(restore.requestId, waiter);
       yield* engine
@@ -2923,16 +2080,6 @@ const make = Effect.gen(function* () {
       } as const;
     });
 
-  // Held keeps: one file per request under server state, so a restart lands them all.
-  const heldKeepsDir = (root: string) =>
-    NodePath.join(
-      config.stateDir,
-      "game-held-keeps",
-      NodeCrypto.createHash("sha256").update(root).digest("hex").slice(0, 16),
-    );
-  const HeldKeep = Schema.fromJsonString(
-    Schema.Struct({ root: Schema.String, input: GameKeepValuesInputSchema }),
-  );
   const holdKeep = (
     g: Pick<Game, "threadId" | "root" | "projectId">,
     request: string,
@@ -2951,7 +2098,6 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const at = DateTime.formatIso(yield* DateTime.now);
-      yield* ensureMigrated(threadId, g);
       yield* engine.dispatch({
         type: "game-build.keep",
         commandId: CommandId.make(
@@ -2978,24 +2124,6 @@ const make = Effect.gen(function* () {
         (shell.activeRunId !== null || (shell.activityRunStatus ?? null) !== null)
         ? shell.title
         : null;
-    });
-  const decodeHeldKeep = Schema.decodeUnknownOption(HeldKeep);
-  /** The held keeps' files of a folder, oldest first. */
-  const heldKeepsOf = (root: string) =>
-    Effect.gen(function* () {
-      const dir = heldKeepsDir(root);
-      const files = yield* Effect.promise(() => NodeFSP.readdir(dir).catch(() => [] as string[]));
-      const at = DateTime.formatIso(yield* DateTime.now);
-      const held = [];
-      for (const name of files.filter((each) => each.endsWith(".json")).toSorted()) {
-        const text = yield* Effect.promise(() =>
-          NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null),
-        );
-        const decoded = text === null ? Option.none() : decodeHeldKeep(text);
-        if (Option.isSome(decoded))
-          held.push({ request: name.slice(0, -".json".length), input: decoded.value.input, at });
-      }
-      return held;
     });
   const landHeldKeeps: GameBuilds["Service"]["landHeldKeeps"] = (root) =>
     Effect.gen(function* () {
@@ -3301,51 +2429,6 @@ const make = Effect.gen(function* () {
       });
     });
 
-  /**
-   * Finishes every no-run restore an earlier server's restart cut short, by running its moves
-   * again. A restore in the game's records is left to its outbox effect, which a restart runs.
-   */
-  const settleRestores = Effect.gen(function* () {
-    const rows = yield* sql<{ readonly root: string; readonly payload_json: string }>`
-      SELECT root, payload_json FROM game_build_restores
-    `.pipe(Effect.orElseSucceed(() => []));
-    const recorded = new Set(
-      (yield* projections.listGameBuildFolders().pipe(Effect.orElseSucceed(() => []))).flatMap(
-        (folder) => (folder.restore === null ? [] : [folder.restore.requestId]),
-      ),
-    );
-    const unsettled = rows.flatMap((row) => {
-      const decoded = decodeNoRunRestore(row.payload_json);
-      return Option.isSome(decoded) &&
-        decoded.value.outcome === null &&
-        !recorded.has(decoded.value.requestId)
-        ? [{ root: row.root, record: decoded.value }]
-        : [];
-    });
-    if (unsettled.length === 0) return;
-    const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
-    for (const row of unsettled)
-      yield* projects.read(row.root).pipe(
-        Effect.flatMap((manifest) =>
-          moveWithoutRun(
-            row.root,
-            manifestProject(manifest),
-            fromLegacyRestore(row.record),
-            "game-builds:settle",
-            null,
-            games.find((game) => game.root === row.root)?.projectId ?? null,
-          ),
-        ),
-        // Its own record settles, so the read into the game's records takes the outcome.
-        Effect.tap(({ outcome, before }) =>
-          saveNoRunRestore(row.root, { ...row.record, before, outcome }),
-        ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("A cut-short restore could not be settled.", { root: row.root, cause }),
-        ),
-      );
-  });
-
   // A chat turn's work is registered after its checkpoint commits, so a
   // restart can cut it off. Owed from data: the newest turn build of each
   // turn-loop game gets its base recorded and, with no facts yet, its
@@ -3388,33 +2471,10 @@ const make = Effect.gen(function* () {
       );
   });
 
-  /** Every game folder's legacy builds read into the records, once (ensureMigrated). */
-  const migrateGames = Effect.gen(function* () {
-    const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
-    for (const summary of games)
-      yield* Effect.gen(function* () {
-        const [turn] = yield* projections.listProjectTurnCheckpoints(summary.projectId, {
-          limit: 1,
-        });
-        // A game no chat ever changed has no builds to read.
-        if (turn === undefined) return;
-        yield* ensureMigrated(turn.threadId, { root: summary.root, projectId: summary.projectId });
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("A game's builds could not be read into its records.", {
-            root: summary.root,
-            cause,
-          }),
-        ),
-      );
-  });
-
   // Measures owed from data, after a restart or between startup and the
   // reactor's subscription: every row that still owes a tier. Builds of an
   // engine this version does not have are not measured.
   const reconcile: GameBuilds["Service"]["reconcile"] = Effect.gen(function* () {
-    yield* settleRestores;
-    yield* migrateGames;
     for (const build of yield* facts.owed)
       if (measurable(build.engine)) yield* facts.measure(build, { queue: "background" });
     yield* reconcileTurns;

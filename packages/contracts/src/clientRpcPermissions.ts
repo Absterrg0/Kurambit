@@ -26,7 +26,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gameCopyUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameCopyThrowAway]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameRunInCopy]: AuthOrchestrationOperateScope,
-  [WS_METHODS.gameKeepVersion]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameBuildStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameKeepValues]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameKeepPlay]: AuthOrchestrationOperateScope,

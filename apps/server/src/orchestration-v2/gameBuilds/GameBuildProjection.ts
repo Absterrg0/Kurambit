@@ -30,7 +30,6 @@ export const emptyFolder = (projectId: ProjectId, root: string): GameBuildFolder
   current: null,
   restore: null,
   held: [],
-  migrated: false,
 });
 
 /** The folder after one event; null when the event leaves it as it was. */
@@ -59,7 +58,6 @@ export const applyToFolder = (
     case "game-build.migrated":
       return {
         ...folder,
-        migrated: true,
         current: event.payload.current ?? folder.current,
         restore: folder.restore ?? event.payload.restore,
       };

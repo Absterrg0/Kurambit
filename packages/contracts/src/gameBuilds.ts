@@ -1336,46 +1336,6 @@ export const GameBuildRestoreInput = Schema.Struct({
   build: GameBuildRef,
   commandId: Schema.optionalKey(Schema.String),
 });
-/** One version of a try, as the Stage lists it. */
-export const GameTryVersion = Schema.Struct({
-  n: PositiveInt,
-  childThreadId: ThreadId,
-  /** Working in its own copy; ready with a build; stopped or failed with what it built, if anything. */
-  state: Schema.Literals(["working", "ready", "stopped", "failed"]),
-  build: Schema.NullOr(GameBuildId),
-  approach: Schema.String,
-});
-export type GameTryVersion = typeof GameTryVersion.Type;
-
-/** A "try it N ways" message of a chat and its versions. */
-export const GameTry = Schema.Struct({
-  threadId: ThreadId,
-  runId: Schema.String,
-  request: Schema.String,
-  at: IsoDateTime,
-  /** The build the versions started from: Undo after a keep goes back to it. */
-  base: Schema.NullOr(GameBuildId),
-  versions: Schema.Array(GameTryVersion),
-  /** The newest keep, when one was made. */
-  kept: Schema.NullOr(Schema.Struct({ n: PositiveInt, at: IsoDateTime })),
-});
-export type GameTry = typeof GameTry.Type;
-
-export const GameTriesInput = Schema.Struct({ threadId: ThreadId });
-/** The chat's tries, newest first. */
-export const GameTriesResult = Schema.Struct({ tries: Schema.Array(GameTry) });
-export type GameTriesResult = typeof GameTriesResult.Type;
-
-/** Keeps one version: the game folder becomes its build through the one restore path. */
-export const GameKeepVersionInput = Schema.Struct({
-  threadId: ThreadId,
-  runId: Schema.String,
-  n: PositiveInt,
-  commandId: Schema.String,
-  /** Keep it although the game would lose health, or without waiting for its check (Keep now). */
-  anyway: Schema.optionalKey(Schema.Boolean),
-});
-
 /** Stops one build's play copy; the folder's own Play is never touched. */
 export const GameBuildStopInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });
 export const GameBuildRestoreResult = Schema.Struct({

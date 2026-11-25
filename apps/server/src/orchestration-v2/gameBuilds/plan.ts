@@ -226,29 +226,5 @@ export const planGameBuildCommand = (
           ],
           effects: [],
         } satisfies GameBuildPlan;
-      case "game-build.migrate": {
-        const events: Array<GameBuildEventDraft> = command.builds.map((build) => ({
-          ...base,
-          type: "game-build.recorded",
-          payload: { build, current: false },
-        }));
-        for (const keep of command.held)
-          events.push({
-            ...base,
-            type: "game-build.kept",
-            payload: { projectId: command.projectId, root: command.root, keep, drop: null },
-          });
-        events.push({
-          ...base,
-          type: "game-build.migrated",
-          payload: {
-            projectId: command.projectId,
-            root: command.root,
-            current: command.current,
-            restore: command.restore,
-          },
-        });
-        return { events, effects: [] } satisfies GameBuildPlan;
-      }
     }
   });

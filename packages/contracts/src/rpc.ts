@@ -43,9 +43,6 @@ import {
   GameBuildMeasureInput,
   GameBuildRefInput,
   GameBuildRestoreInput,
-  GameKeepVersionInput,
-  GameTriesInput,
-  GameTriesResult,
   GameBuildRestoreResult,
   GameBuildStopInput,
   GameBuildsInput,
@@ -397,8 +394,6 @@ export const WS_METHODS = {
   gameSavedList: "game.savedList",
   gameSavedDelete: "game.savedDelete",
   gameBuilds: "game.builds",
-  gameTries: "game.tries",
-  gameKeepVersion: "game.keepVersion",
   gameBuildCompare: "game.buildCompare",
   gameBuildFacts: "game.buildFacts",
   gameBuildChanges: "game.buildChanges",
@@ -1608,16 +1603,6 @@ const WsGameBuildStopRpc = Rpc.make(WS_METHODS.gameBuildStop, {
   success: Schema.Struct({}),
   error: gameError,
 });
-const WsGameTriesRpc = Rpc.make(WS_METHODS.gameTries, {
-  payload: GameTriesInput,
-  success: GameTriesResult,
-  error: gameError,
-});
-const WsGameKeepVersionRpc = Rpc.make(WS_METHODS.gameKeepVersion, {
-  payload: GameKeepVersionInput,
-  success: GameBuildRestoreResult,
-  error: gameError,
-});
 const WsGameBuildRestoreRpc = Rpc.make(WS_METHODS.gameBuildRestore, {
   payload: GameBuildRestoreInput,
   success: GameBuildRestoreResult,
@@ -1748,8 +1733,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameCopyUpdateRpc,
   WsGameCopyThrowAwayRpc,
   WsGameRunInCopyRpc,
-  WsGameTriesRpc,
-  WsGameKeepVersionRpc,
   WsGameBuildStopRpc,
   WsGameKeepValuesRpc,
   WsGameKeepPlayRpc,

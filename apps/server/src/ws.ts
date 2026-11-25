@@ -1839,19 +1839,6 @@ const layerWsRpc = (
         [WS_METHODS.gameCopyThrowAway]: ({ threadId }) => gameCopies.throwAway(threadId, threadId),
         [WS_METHODS.gameRunInCopy]: ({ threadId, commandId }) =>
           gameCopies.runInCopy(threadId, commandId),
-        // "Try it N ways" is gone: no chat has tries now, and an older client's Keep is refused.
-        // An earlier game's versions are its builds, read into its records.
-        [WS_METHODS.gameTries]: () => Effect.succeed({ tries: [] }),
-        [WS_METHODS.gameKeepVersion]: ({ threadId }) =>
-          Effect.fail(
-            new GameOperationError({
-              operation: "Keep version",
-              path: threadId,
-              reason: "invalid-input",
-              detail:
-                "Trying several ways is gone: run the chat in a copy and bring it in instead.",
-            }),
-          ),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
         [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId, fold }) =>
