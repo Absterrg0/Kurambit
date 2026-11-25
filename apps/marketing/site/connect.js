@@ -1,6 +1,5 @@
-// The Connect page: the Kurambit app on this computer opens it with ?state=<s>&port=<p>. The
-// person signs in with GitHub (Clerk); the page mints a publish key and posts it back to the app's
-// own server on 127.0.0.1:<port>, which checks the state it made.
+// The Connect page: Kurambit opens it with ?code=<the code the app shows>. The person signs in
+// with GitHub (Clerk), checks the code matches, and approves; the app, polling, then gets its key.
 const CLERK_PUBLISHABLE_KEY = "pk_live_Y2xlcmsua3VyYW1iaXQuY29tJA";
 const CLERK_FRONTEND_API = "https://clerk.kurambit.com";
 
@@ -9,9 +8,7 @@ const say = (text) => {
   if (status) status.textContent = text;
 };
 
-const params = new URLSearchParams(location.search);
-const state = params.get("state") ?? "";
-const port = Number(params.get("port"));
+const code = (new URLSearchParams(location.search).get("code") ?? "").toUpperCase();
 
 const loadClerk = () =>
   new Promise((resolve, reject) => {
@@ -24,32 +21,42 @@ const loadClerk = () =>
     document.head.append(script);
   });
 
-const connect = async (clerk) => {
-  say("Connecting your app…");
+const approve = async (clerk) => {
+  say("Connecting…");
   const token = await clerk.session.getToken();
-  const minted = await fetch("/api/publish-key", {
+  const answer = await fetch("/api/publish-device", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ step: "approve", userCode: code, token }),
   });
-  if (!minted.ok) throw new Error("Your app could not be connected. Try again.");
-  const { key, login } = await minted.json();
-  const form = document.querySelector("[data-connect-form]");
-  form.action = `http://127.0.0.1:${port}/api/game/publish/connected`;
-  form.elements.namedItem("state").value = state;
-  form.elements.namedItem("key").value = key;
-  form.elements.namedItem("login").value = login ?? "";
-  form.submit();
+  document.querySelector("[data-connect-confirm]").hidden = true;
+  if (answer.ok) say("Kurambit is connected. You can close this tab and publish from Kurambit.");
+  else if (answer.status === 404)
+    say("This code has expired or was already used. Start again from Kurambit.");
+  else say("Kurambit could not be connected. Try again.");
+};
+
+const confirm = (clerk) => {
+  say(
+    `Signed in as ${clerk.user.username ?? clerk.user.primaryEmailAddress?.emailAddress ?? "you"}.`,
+  );
+  document.querySelector("[data-connect-code]").textContent = code;
+  document.querySelector("[data-connect-confirm]").hidden = false;
+  document
+    .querySelector("[data-connect-approve]")
+    .addEventListener("click", () => approve(clerk).catch((error) => say(String(error))), {
+      once: true,
+    });
 };
 
 const main = async () => {
-  if (!/^[A-Za-z0-9_-]{16,128}$/.test(state) || !(port > 0 && port < 65536)) {
-    say("Open this page from Kurambit: Export… → Publish.");
+  if (!/^[A-Z]{4}-[A-Z]{4}$/.test(code)) {
+    say("Open this page from Kurambit: Export… → Publish on kurambit.com.");
     return;
   }
   const clerk = await loadClerk();
   await clerk.load();
-  if (clerk.user) return connect(clerk);
+  if (clerk.user) return confirm(clerk);
   say("Sign in with GitHub so your Kurambit app can publish games.");
   clerk.mountSignIn(document.querySelector("[data-connect-signin]"), {
     forceRedirectUrl: location.href,

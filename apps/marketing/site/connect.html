@@ -17,12 +17,11 @@
         <h1>Connect Kurambit</h1>
         <p data-connect-status>Sign in with GitHub so your Kurambit app can publish games.</p>
         <div data-connect-signin></div>
-        <!-- The key goes back to the app on this computer by a form post, never in a URL. -->
-        <form data-connect-form method="post" hidden>
-          <input type="hidden" name="state" />
-          <input type="hidden" name="key" />
-          <input type="hidden" name="login" />
-        </form>
+        <div data-connect-confirm hidden>
+          <p>Check that this code matches the one in Kurambit:</p>
+          <p class="connect-code" data-connect-code></p>
+          <button type="button" data-connect-approve>Connect this Kurambit</button>
+        </div>
       </main>
     </div>
   </body>
