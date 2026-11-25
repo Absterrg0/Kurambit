@@ -237,6 +237,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
      --type-* variables on :root, which step up on phones. Text colour is
      separate: pick a tier (strong, default, muted, dim). Render them through
      <Text> in components/ui/text.tsx. */
+  /* The serif display role, with font-display: dialog titles. Home's headline is
+     the same voice a size up. */
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.1;
+  --text-display--font-weight: 400;
+  --text-display--letter-spacing: -0.005em;
   --text-title: var(--type-title);
   --text-title--line-height: 1.27;
   --text-title--font-weight: 600;
@@ -355,6 +361,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   /* Vermilion's live tone: an agent at work, a build being made. */
   --color-live: var(--live);
   --color-popover-foreground: var(--contrast-popover-foreground);
+  --color-tooltip-foreground: var(--tooltip-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--contrast-card-foreground);
   --color-card: var(--card);
@@ -1416,9 +1423,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 @utility max-h-inset-pane {
   max-height: calc(100dvh - 1rem);
 }
+/* A solid chip: ink on paper in light, a lifted step in dark, so a hint reads on
+   any ground without a rim. Pair with text-tooltip-foreground and kbd-in-tooltip. */
 @utility surface-tooltip {
-  @apply surface-popover;
-  --surface-shadow: var(--tooltip-shadow);
+  border: 1px solid transparent;
+  background: linear-gradient(var(--tooltip-fill), var(--tooltip-fill)) border-box;
+  box-shadow: var(--tooltip-shadow);
 }
 /* A small solid chip over content, such as a floating scroll-to-bottom. */
 @utility surface-floating {
@@ -1474,6 +1484,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 }
 @utility kbd-in-popover {
   --kbd-background: var(--kbd-popover-fill);
+}
+@utility kbd-in-tooltip {
+  --kbd-background: color-mix(in srgb, var(--tooltip-foreground) 14%, transparent);
+  --kbd-foreground: color-mix(in srgb, var(--tooltip-foreground) 72%, var(--tooltip-fill));
 }
 /* A tinted footer under a popover: the chip keeps the popover's own ground, so the
    footer's hints read like the rows' instead of darker. */
@@ -1745,6 +1759,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --popover-shadow:
     0 0 0 1px rgb(var(--ink-alpha) / 5%), 0 14px 36px -12px rgb(var(--ink-alpha) / 20%),
     0 2px 6px rgb(var(--ink-alpha) / 5%);
+  --tooltip-fill: color-mix(in srgb, var(--foreground) 96%, white);
+  --tooltip-foreground: var(--background);
   --tooltip-shadow: var(--raised-shadow);
   --card-rim: linear-gradient(var(--border), var(--border));
   --card-shadow: none;
@@ -1784,6 +1800,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   @variant dark {
     --ink-alpha: 255 248 235;
     --raised-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+    --tooltip-fill: color-mix(in srgb, var(--surface-raised), var(--foreground) 7%);
+    --tooltip-foreground: var(--strong-foreground);
     --field-hover-rim: color-mix(in srgb, var(--input), var(--foreground) 12%);
     --raised-hover-fill: linear-gradient(
       color-mix(in srgb, var(--surface-raised), var(--foreground) 4%),

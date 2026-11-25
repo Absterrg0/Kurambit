@@ -64,7 +64,7 @@ function Input({
       className={
         cn(
           !unstyled &&
-            "surface-well kbd-in-control relative inline-flex w-full rounded-lg text-prompt text-foreground has-focus-visible:surface-focus has-aria-invalid:surface-invalid has-focus-visible:has-aria-invalid:surface-invalid-focus has-disabled:opacity-64",
+            "surface-well kbd-in-control relative inline-flex w-full rounded-md text-prompt text-foreground has-focus-visible:surface-focus has-aria-invalid:surface-invalid has-focus-visible:has-aria-invalid:surface-invalid-focus has-disabled:opacity-64",
           !unstyled && size === "compact" && "rounded-md",
           font === "mono" && "font-mono tabular-nums",
           className,

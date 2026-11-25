@@ -30,7 +30,7 @@ const popoverPopupWidthClassName = {
 const popoverViewportPaddingClassName = {
   default: "py-4 [--viewport-inline-padding:--spacing(4)]",
   compact: "py-2 [--viewport-inline-padding:--spacing(3)]",
-  none: "rounded-[calc(var(--radius-lg)-1px)] py-0 [--viewport-inline-padding:0px]",
+  none: "rounded-[calc(var(--radius-xl)-1px)] py-0 [--viewport-inline-padding:0px]",
 } as const;
 
 function PopoverPopup({
@@ -87,9 +87,10 @@ function PopoverPopup({
       >
         <PopoverPrimitive.Popup
           className={cn(
-            "kbd-in-popover relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none transition-[width,height,scale,opacity] motion-popup has-data-[slot=calendar]:rounded-xl data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none",
+            "kbd-in-popover relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-xl text-popover-foreground outline-none transition-[width,height,scale,opacity] motion-popup data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none",
             variant !== "panel" && !tooltipStyle && "surface-popover",
-            tooltipStyle && "surface-tooltip w-fit text-balance rounded-md text-meta font-normal",
+            tooltipStyle &&
+              "surface-tooltip kbd-in-tooltip w-fit text-balance rounded-md text-meta font-medium text-tooltip-foreground",
             width !== "auto" && ["max-w-[calc(100vw-2rem)]", popoverPopupWidthClassName[width]],
             variant === "panel" &&
               "w-full overflow-visible rounded-none border-0 bg-transparent shadow-none before:hidden [backdrop-filter:none] [-webkit-backdrop-filter:none]",

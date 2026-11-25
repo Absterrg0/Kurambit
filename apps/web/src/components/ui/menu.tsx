@@ -66,7 +66,7 @@ function MenuPopup({
       >
         <MenuPrimitive.Popup
           className={cn(
-            "surface-popover kbd-in-popover relative flex origin-(--transform-origin) rounded-lg outline-none focus:outline-none transition-[scale,opacity] motion-popup data-starting-style:scale-98 data-starting-style:opacity-0 data-ending-style:scale-98 data-ending-style:opacity-0",
+            "surface-popover kbd-in-popover relative flex origin-(--transform-origin) rounded-xl outline-none focus:outline-none transition-[scale,opacity] motion-popup data-starting-style:scale-98 data-starting-style:opacity-0 data-ending-style:scale-98 data-ending-style:opacity-0",
             spacing === "relaxed" && RELAXED_PICKER_CLASS,
             // Portaled menus can overlap an Electron window drag region (e.g.
             // the Review panel header). Drag hit-testing ignores z-index, so
@@ -80,7 +80,7 @@ function MenuPopup({
           id={popupId}
           finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
         >
-          <div className="max-h-(--available-height) w-full overflow-y-auto p-1 [--popup-item-radius:calc(var(--radius-lg)-5px)]">
+          <div className="max-h-(--available-height) w-full overflow-y-auto p-1 [--popup-item-radius:calc(var(--radius-xl)-5px)]">
             {children}
           </div>
         </MenuPrimitive.Popup>

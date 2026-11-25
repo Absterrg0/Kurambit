@@ -67,8 +67,8 @@ export function DesignSystemPage() {
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-16 px-6 pt-6 pb-24">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Text variant="body" tone="muted" render={<p className="max-w-2xl" />}>
-            Every primitive, live. Vermilion marks only what is live; the primary action is a plain
-            light fill in dark and a dark fill in light.
+            Every primitive, live. Vermilion is the one accent: the primary action, focus, what is
+            live, switches and checks. Everything else is warm ink and paper, told apart by level.
           </Text>
           <AppearanceSwitch />
         </div>
@@ -238,7 +238,7 @@ function FoundationsSection() {
     <Section
       id="foundations"
       title="Foundations"
-      description="Palette tokens, the four text tiers and the seven type roles. Colour on screen belongs to the games; the interface stays grey."
+      description="Palette tokens, the four text tiers and the seven type roles. Colour on screen belongs to the games; the interface stays ink and paper."
     >
       <Specimen label="Colour tokens" source="bg-{token}" grid>
         {COLOR_TOKENS.map(([name, className]) => (
@@ -817,7 +817,7 @@ function StatusSection() {
     <Section
       id="status"
       title="Status and loading"
-      description="Status dots carry a tone; live (vermilion) is only for an agent at work or a build being made. Loading keeps final sizes so nothing shifts."
+      description="Status dots carry a tone; live is for an agent at work or a build being made. Loading keeps final sizes so nothing shifts."
     >
       <Specimen label="Status dots" source="<StatusDot tone size>">
         {DOT_TONES.map((tone) => (

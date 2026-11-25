@@ -148,9 +148,12 @@ function TooltipPopup({
       <TooltipPositioner align={align} anchor={anchor} side={side} sideOffset={sideOffset}>
         <TooltipPrimitive.Popup
           className={cn(
-            "kbd-in-popover relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-meta font-normal text-popover-foreground transition-[width,height,scale,opacity] motion-popup data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 motion-reduce:transition-none",
-            // glass floats over media with the popover's deeper shadow.
-            variant === "glass" ? "surface-popover" : "surface-tooltip",
+            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-meta transition-[width,height,scale,opacity] motion-popup data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 motion-reduce:transition-none",
+            // The default is a solid chip that reads on any ground; glass floats over
+            // media with the popover's own fill and deeper shadow.
+            variant === "glass"
+              ? "surface-popover kbd-in-popover font-normal text-popover-foreground"
+              : "surface-tooltip kbd-in-tooltip font-medium text-tooltip-foreground",
             variant === "code"
               ? "max-w-120 wrap-anywhere text-left font-mono text-caption leading-relaxed"
               : "max-w-80 wrap-anywhere whitespace-normal leading-snug",

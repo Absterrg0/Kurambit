@@ -17,7 +17,7 @@ function Textarea({ className, size = "default", unstyled = false, ...props }: T
       className={
         cn(
           !unstyled &&
-            "surface-well relative inline-flex w-full rounded-lg text-prompt text-foreground has-focus-visible:surface-focus has-aria-invalid:surface-invalid has-focus-visible:has-aria-invalid:surface-invalid-focus has-disabled:opacity-64",
+            "surface-well relative inline-flex w-full rounded-md text-prompt text-foreground has-focus-visible:surface-focus has-aria-invalid:surface-invalid has-focus-visible:has-aria-invalid:surface-invalid-focus has-disabled:opacity-64",
           className,
         ) || undefined
       }

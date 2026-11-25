@@ -104,7 +104,7 @@ function AutocompletePopup({
       >
         <span
           className={cn(
-            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity] motion-popup has-[>[data-starting-style]]:scale-98 has-[>[data-starting-style]]:opacity-0 has-[>[data-ending-style]]:scale-98 has-[>[data-ending-style]]:opacity-0 [--popup-item-radius:calc(var(--radius-lg)-5px)]",
+            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-xl transition-[scale,opacity] motion-popup has-[>[data-starting-style]]:scale-98 has-[>[data-starting-style]]:opacity-0 has-[>[data-ending-style]]:scale-98 has-[>[data-ending-style]]:opacity-0 [--popup-item-radius:calc(var(--radius-xl)-5px)]",
             className,
           )}
         >

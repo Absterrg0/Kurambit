@@ -98,8 +98,8 @@ function AlertDialogFooter({
   return (
     <div
       className={cn(
-        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
-        variant === "default" && "border-t bg-muted/72 py-4",
+        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-xl)-1px)]",
+        variant === "default" && "bg-muted/72 py-4",
         variant === "bare" && "pb-6",
         className,
       )}
@@ -112,7 +112,10 @@ function AlertDialogFooter({
 function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props) {
   return (
     <AlertDialogPrimitive.Title
-      className={cn("wrap-anywhere shrink-0 text-title text-strong-foreground", className)}
+      className={cn(
+        "wrap-anywhere shrink-0 font-display text-display text-strong-foreground",
+        className,
+      )}
       data-slot="alert-dialog-title"
       {...props}
     />

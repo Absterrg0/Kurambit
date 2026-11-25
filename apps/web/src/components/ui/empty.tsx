@@ -11,13 +11,13 @@ const emptySizeClassName = {
 
 /**
  * `page` fills the space it is given (a whole route or pane with nothing in it).
- * `well` is the in-flow empty state: a sunken box holding a title, one line and
- * at most one action, sized to its content, for a list or panel with nothing in
+ * `well` is the in-flow empty state: a box a level below its panel holding a
+ * title, one line and at most one action, sized to its content, for a list or panel with nothing in
  * it yet.
  */
 const emptyVariantClassName = {
   page: "flex-1",
-  well: "flex-none gap-3 rounded-xl surface-well px-6 py-8 [&_[data-slot=empty-content]]:mt-1 [--type-title:0.9375rem]",
+  well: "flex-none gap-3 rounded-xl bg-card px-6 py-8 [&_[data-slot=empty-content]]:mt-1 [--type-title:0.9375rem]",
 } as const;
 
 function Empty({
