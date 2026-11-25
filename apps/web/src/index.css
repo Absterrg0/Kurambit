@@ -1586,39 +1586,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   }
 }
 
-/* The one atmosphere, behind empty states only (Home's hero, a game's empty chat): a warm
-   halftone glow falling from the top of the panel, an ordered dither like a print. The fill is
-   the glow; the mask is solid at its heart and only dots further out, so the glow breaks into
-   dots as it fades. The core layer adds coarser offset dots between the two, where a printed
-   halftone's dots swell. Static: nothing here animates. */
+/* The one atmosphere, behind empty states only: a dim warm light falling from the top of the
+   panel, ordered-dithered like an old print. scripts/export-atmosphere.py renders it one image
+   pixel per dither cell; it is drawn at 2 CSS px a cell, pixelated, so the cells stay crisp.
+   Static: nothing here animates. */
 @utility atmosphere {
-  --atmosphere-ink: color-mix(in oklch, var(--live), #f0a43a 45%);
-  --atmosphere-strength: 16%;
   position: absolute;
   inset: 0 0 auto;
-  height: 62%;
+  height: 600px;
   pointer-events: none;
-  background: radial-gradient(
-    ellipse 62% 100% at 50% 0%,
-    color-mix(in srgb, var(--atmosphere-ink) var(--atmosphere-strength), transparent),
-    color-mix(in srgb, var(--atmosphere-ink) calc(var(--atmosphere-strength) * 0.4), transparent)
-      45%,
-    transparent 72%
-  );
-  mask:
-    radial-gradient(ellipse 24% 34% at 50% 0%, #000 10%, transparent 100%),
-    radial-gradient(circle, #000 0 1.1px, transparent 1.6px) 0 0 / 6px 6px;
+  background: url("/atmosphere-light.png") top center / 1920px 600px no-repeat;
+  image-rendering: pixelated;
 
   @variant dark {
-    --atmosphere-strength: 22%;
+    background-image: url("/atmosphere-dark.png");
   }
-}
-@utility atmosphere-core {
-  @apply atmosphere;
-  mask:
-    radial-gradient(circle, #000 0 1.9px, transparent 2.4px) 3px 3px / 6px 6px,
-    radial-gradient(ellipse 40% 55% at 50% 0%, #000 25%, transparent 80%);
-  mask-composite: intersect;
 }
 
 /* Checked controls and switch thumbs. */

@@ -1,9 +1,4 @@
-/** The warm halftone glow behind an empty state, in two dot grids. Its parent must be positioned. */
+/** The dithered warm light behind an empty state. Its parent must be positioned. */
 export function Atmosphere() {
-  return (
-    <>
-      <div aria-hidden="true" className="atmosphere" />
-      <div aria-hidden="true" className="atmosphere-core" />
-    </>
-  );
+  return <div aria-hidden="true" className="atmosphere" />;
 }
