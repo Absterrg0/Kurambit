@@ -18,7 +18,7 @@ import { Text } from "../ui/text";
 import type { ChatMark, ChatNote } from "./chatList.logic";
 
 /** A one-line row of the sidebar's own places: New game, Search, Library, "Show 12 more". */
-export const SIDEBAR_ROW =
+const SIDEBAR_ROW =
   "group/row relative flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:surface-sidebar-row-selected";
 
 /** What a chat is doing, in one mark at the end of its title; nothing when idle. */
