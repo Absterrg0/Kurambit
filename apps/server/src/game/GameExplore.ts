@@ -440,7 +440,13 @@ const make = Effect.gen(function* () {
       const file = `act-${String(callIndex).padStart(2, "0")}-observe.png`;
       const screenshotPath = NodePath.join(session.traceDir, file);
       const reply = yield* Effect.tryPromise({
-        try: (signal) => session.play.act([...input.steps], screenshotPath, signal),
+        try: (signal) =>
+          session.play.act([...input.steps], screenshotPath, signal, (n) =>
+            NodePath.join(
+              session.traceDir,
+              `act-${String(callIndex).padStart(2, "0")}-frame-${String(n)}.png`,
+            ),
+          ),
         // The game stopping, crashing or refusing the act is the build's; our
         // browser going away is ours.
         catch: (cause) => {
@@ -502,6 +508,9 @@ const make = Effect.gen(function* () {
         screenshotPath:
           keptScreenshot === "" ? null : NodePath.join(session.traceDir, keptScreenshot),
         ...(screenshotReason === undefined ? {} : { screenshotReason }),
+        ...(reply.frames === undefined || reply.frames.length === 0
+          ? {}
+          : { frames: reply.frames.map((frame) => ({ ...frame })) }),
         ...observed,
         consoleMessages,
         consoleTruncated,

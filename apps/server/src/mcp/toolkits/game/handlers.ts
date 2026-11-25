@@ -32,6 +32,7 @@ import {
   GameCheckResult,
   GameEvalResult,
   GameExploreActResult,
+  type GamePlayActInput,
   GameExploreCloseResult,
   GameKeepGoingStatus,
   GameModelSheetResult,
@@ -422,13 +423,35 @@ const replayMoment = (input: { readonly run: string; readonly at?: number }) =>
     ),
   );
 
+/**
+ * An act, with the frames its labelled screenshot steps took as images, in route order. The
+ * act's closing picture stays a path: the agent reads it when it wants it.
+ */
+const playAct = (act: GamePlayActInput) =>
+  Effect.gen(function* () {
+    const result = yield* withGame(GameExplore.GameExplore, (explore, threadId) =>
+      explore.play(threadId, act),
+    );
+    const frames = result.frames ?? [];
+    if (frames.length === 0) return result;
+    const shots = yield* Effect.promise(() =>
+      Promise.all(frames.map((frame) => NodeFSP.readFile(frame.path).then(png, () => null))),
+    );
+    const screenshots = shots.filter((shot) => shot !== null);
+    return screenshots.length === 0 ? result : { ...result, screenshots };
+  }).pipe(
+    as(
+      Schema.Struct({
+        ...GameExploreActResult.fields,
+        screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+      }),
+    ),
+  );
+
 const playHandlers = {
   game_play: McpToolAccess.actsAsCaller((input) =>
     dispatch("game_play", input, {
-      act: (act) =>
-        withGame(GameExplore.GameExplore, (explore, threadId) => explore.play(threadId, act)).pipe(
-          as(GameExploreActResult),
-        ),
+      act: playAct,
       close: (close) =>
         withGame(GameExplore.GameExplore, (explore, threadId) =>
           explore.close(threadId, close),

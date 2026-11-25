@@ -869,8 +869,10 @@ export const openWebPlaySession = async (input: {
       steps: readonly GameExploreStep[],
       screenshotPath: string | null,
       signal: AbortSignal | undefined,
+      framePath: ((n: number) => string) | undefined,
     ) => {
       let executedInputSteps = 0;
+      const frames: Array<{ label: string; path: string }> = [];
       const held: string[] = [];
       // Held again each act: the game may have reloaded its page since the last.
       const clocked = await bounded(
@@ -913,8 +915,20 @@ export const openWebPlaySession = async (input: {
           if ("waitMs" in step) {
             await pass(step.waitMs);
           } else if ("screenshot" in step) {
-            // The act's single persisted frame is the observation; a labelled
-            // mid-route capture adds no second persisted image.
+            // The frame as the route stands here; the game holds still while it is taken.
+            if (framePath !== undefined) {
+              const path = framePath(frames.length + 1);
+              const frame = await bounded(shoot(), PLAY_BOUNDS.stillMs);
+              if (
+                frame !== null &&
+                frame !== TIMED_OUT &&
+                (await NodeFSP.writeFile(path, frame).then(
+                  () => true,
+                  () => false,
+                ))
+              )
+                frames.push({ label: step.screenshot, path });
+            }
           } else if ("click" in step) {
             const point =
               step.x === undefined || step.y === undefined
@@ -979,6 +993,7 @@ export const openWebPlaySession = async (input: {
         probe,
         executedInputSteps,
         screenshot: saved,
+        frames,
         consoleMessages: drained.messages,
         consoleTruncated: drained.truncated,
       };
@@ -987,7 +1002,7 @@ export const openWebPlaySession = async (input: {
       new PlayUnresponsive(
         `The game's page stopped answering (its main thread did not respond within ${PLAY_BOUNDS.webCallMs / 1000} s).`,
       );
-    const act: PlaySession["act"] = async (steps, screenshotPath, signal) => {
+    const act: PlaySession["act"] = async (steps, screenshotPath, signal, framePath) => {
       signal?.throwIfAborted();
       if (endedWith !== null) throw endError(endedWith);
       const stepMs = steps.reduce(
@@ -997,13 +1012,17 @@ export const openWebPlaySession = async (input: {
           ("press" in step ? 50 : 0),
         0,
       );
+      const frameSteps = steps.filter((step) => "screenshot" in step).length;
       const done = await Promise.race([
         bounded(
-          actBody(steps, screenshotPath, signal).catch((cause: unknown) => {
+          actBody(steps, screenshotPath, signal, framePath).catch((cause: unknown) => {
             throw classify(cause);
           }),
-          // Each step's advance may take its own wall bound on a slow page.
-          steps.length * advanceWallMs(0) + 2 * stepMs + PLAY_BOUNDS.webActGraceMs,
+          // Each step's advance may take its own wall bound on a slow page, each frame its own.
+          steps.length * advanceWallMs(0) +
+            2 * stepMs +
+            frameSteps * PLAY_BOUNDS.stillMs +
+            PLAY_BOUNDS.webActGraceMs,
         ),
         ended.then((end) => ({ end })),
       ]);

@@ -184,6 +184,10 @@ export const GameExploreActResult = Schema.Struct({
   screenshotPath: Schema.NullOr(Schema.String),
   /** Plain reason when screenshotPath is null (native headless only; web always has a screenshot). */
   screenshotReason: Schema.optionalKey(Schema.String),
+  /** The frames the act's labelled `screenshot` steps took, in route order. */
+  frames: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ label: Schema.String, path: Schema.String })),
+  ),
   /** Visible text keyed <owner>.<name> (native only). */
   screenText: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /** Visible interactive controls (native only). */

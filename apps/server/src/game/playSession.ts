@@ -27,6 +27,8 @@ export interface PlaySession {
     steps: readonly GameExploreStep[],
     screenshotPath: string | null,
     signal?: AbortSignal,
+    /** Where the act's nth labelled `screenshot` step (from 1) writes its frame. */
+    framePath?: (n: number) => string,
   ) => Promise<PlayActObservation>;
   /** Writes the picture as it is now to `path`; false when it could not. */
   readonly still: (path: string) => Promise<boolean>;
@@ -139,6 +141,8 @@ export interface PlayObservation {
 export interface PlayActObservation extends PlayObservation {
   readonly executedInputSteps: number;
   readonly screenshot: boolean;
+  /** The frames the act's labelled `screenshot` steps took, in order. */
+  readonly frames?: ReadonlyArray<{ readonly label: string; readonly path: string }>;
   readonly uiResults?: ReadonlyArray<GameExploreUiResult>;
   readonly inspections?: ReadonlyArray<GameExploreInspection>;
 }

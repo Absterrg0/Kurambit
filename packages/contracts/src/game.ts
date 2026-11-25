@@ -570,7 +570,7 @@ export const GamePlaytestStep = Schema.Union([
   }),
   Schema.Struct({
     screenshot: Schema.String.check(Schema.isMaxLength(80)).annotate({
-      description: "A label for a frame taken here.",
+      description: "A frame taken here, answered as an image with this label.",
     }),
   }),
 ]);
