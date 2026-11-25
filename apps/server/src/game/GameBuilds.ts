@@ -993,7 +993,8 @@ const make = Effect.gen(function* () {
       const page = rail === null ? yield* recordsOf(g, limit + 1, input.before) : [];
       const builds =
         rail === null ? (yield* rowsFrom(g, page.slice(0, limit), folder)).builds : rail.rows;
-      const current = input.before === undefined ? (folder?.current ?? null) : null;
+      // A copy with no build of its own yet holds the game's build it was made from.
+      const current = input.before === undefined ? (folder?.current ?? rail?.seat ?? null) : null;
       const pendingTurn = builds.some(
         (build) => build.source._tag === "turn" && build.source.runId === pending,
       )
@@ -1029,7 +1030,8 @@ const make = Effect.gen(function* () {
         false,
       );
       const next = gamePage.length > limit ? gamePage[limit - 1]!.at : null;
-      if (before !== undefined) return { rows: gameRows.builds, measured: gameRows.measured, next };
+      if (before !== undefined)
+        return { rows: gameRows.builds, measured: gameRows.measured, next, seat: null };
       const copiesFolder = `${gameRunRefsFolder(NO_RUN)}copies/${threadRefKey(g.threadId)}`;
       const since = isoOfSeconds(
         Math.max(
@@ -1043,6 +1045,8 @@ const make = Effect.gen(function* () {
         rows: [...copyRows.builds, ...gameRows.builds],
         measured: new Map([...gameRows.measured, ...copyRows.measured]),
         next,
+        // The game's newest build at the seat: what the copy started as.
+        seat: gameRows.builds[0]?.id ?? null,
       };
     });
 
