@@ -895,6 +895,7 @@ function useLocalDispatchState(input: {
   activePendingApproval: RuntimeRequestId | null;
   activePendingUserInput: RuntimeRequestId | null;
   threadError: string | null | undefined;
+  waitingRunId: RunId | null;
 }) {
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
 
@@ -911,6 +912,7 @@ function useLocalDispatchState(input: {
     hasPendingApproval: input.activePendingApproval !== null,
     hasPendingUserInput: input.activePendingUserInput !== null,
     threadError: input.threadError,
+    waitingRunId: input.waitingRunId,
   });
   const activeLocalDispatch = serverAcknowledgedLocalDispatch ? null : localDispatch;
   const beginLocalDispatch = (options?: {
@@ -930,6 +932,7 @@ function useLocalDispatchState(input: {
       return createLocalDispatchSnapshot(input.activeThread, {
         ...options,
         latestUserMessageId: input.latestUserMessageId,
+        waitingRunId: input.waitingRunId,
       });
     });
   };
@@ -2401,6 +2404,12 @@ export default function ChatView(props: ChatViewProps) {
     activePendingApproval: activePendingApproval?.requestId ?? null,
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
+    // A turn held with a reason waits for another chat in the game's folder (GameFolders).
+    waitingRunId:
+      serverProjection?.runs.findLast(
+        (run) =>
+          run.status === "queued" && run.queueHeld === true && run.queueHeldReason !== undefined,
+      )?.id ?? null,
   });
   const optimisticCompactionMessage = optimisticUserMessages.at(-1);
   const latestServerUserItem = serverVisibleTurnItems.findLast(

@@ -743,10 +743,13 @@ function ChatRow({
   );
   const copyWaits = copyPlace?.state._tag === "conflicts" || copyPlace?.state._tag === "held";
   const ownMark = place === "list" ? chatMark(chat) : null;
-  // Keep going and a build being made are the game's work: the chat the game opens to shows it.
+  const note = place === "list" ? chatNote(chat, siblings) : null;
+  // Keep going and a build being made are the game's work: the chat the game opens to shows it,
+  // unless that chat's own turn waits for another chat, which its row says instead.
   const gameAtWork =
     place === "list" &&
     chat.id === opens.id &&
+    note?.kind !== "waits" &&
     (game.run !== null || game.operation?.state === "running");
   const mark = ownMark ?? (copyWaits ? "waiting" : gameAtWork ? "working" : null);
   // The chat whose turn made the build says it does not start; when that chat has no row at
@@ -788,7 +791,7 @@ function ChatRow({
         resting={place !== "list"}
         mark={mark}
         broken={broken}
-        note={place === "list" ? chatNote(chat, siblings) : null}
+        note={note}
         action={action}
         dropping={dropping}
         renaming={

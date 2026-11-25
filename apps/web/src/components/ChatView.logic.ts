@@ -1063,6 +1063,8 @@ export interface LocalDispatchSnapshot {
   latestRunCompletedAt: string | null;
   runtimeStatus: NonNullable<Thread["runtime"]>["status"] | null;
   runtimeUpdatedAt: string | null;
+  /** The newest run waiting held for another thread's work (its game folder), when sent. */
+  waitingRunId: RunId | null;
 }
 
 export function createLocalDispatchSnapshot(
@@ -1071,6 +1073,7 @@ export function createLocalDispatchSnapshot(
     preparingWorktree?: boolean;
     latestUserMessageId?: ChatMessage["id"] | null;
     submissionIntent?: ComposerSubmissionIntent;
+    waitingRunId?: RunId | null;
   },
 ): LocalDispatchSnapshot {
   const latestRun = activeThread?.latestRun ?? null;
@@ -1086,6 +1089,7 @@ export function createLocalDispatchSnapshot(
     latestRunCompletedAt: latestRun?.completedAt ?? null,
     runtimeStatus: runtime?.status ?? null,
     runtimeUpdatedAt: runtime?.updatedAt ?? null,
+    waitingRunId: options?.waitingRunId ?? null,
   };
 }
 
@@ -1114,9 +1118,15 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   hasPendingApproval: boolean;
   hasPendingUserInput: boolean;
   threadError: string | null | undefined;
+  waitingRunId?: RunId | null;
 }): boolean {
   if (!input.localDispatch) {
     return false;
+  }
+  // The send became a turn that waits, held, for another thread's work: nothing runs until it
+  // starts, so the send is done and the thread is not working.
+  if (input.waitingRunId != null && input.waitingRunId !== input.localDispatch.waitingRunId) {
+    return true;
   }
   if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
     return true;

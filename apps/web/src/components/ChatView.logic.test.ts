@@ -558,6 +558,25 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(false);
   });
 
+  it("acknowledges a send whose turn waits, held, for another chat's work", () => {
+    const localDispatch = createLocalDispatchSnapshot(
+      makeThread({ latestRun: null, runtime: null }),
+    );
+    const input = {
+      localDispatch,
+      phase: "disconnected",
+      latestRun: null,
+      runtime: null,
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+      threadError: null,
+    } as const;
+    expect(hasServerAcknowledgedLocalDispatch(input)).toBe(false);
+    expect(
+      hasServerAcknowledgedLocalDispatch({ ...input, waitingRunId: RunId.make("held-1") }),
+    ).toBe(true);
+  });
+
   it("acknowledges a settled newer background turn", () => {
     const localDispatch = createLocalDispatchSnapshot(
       makeThread({ latestRun: completedTurn, runtime: readySession }),
