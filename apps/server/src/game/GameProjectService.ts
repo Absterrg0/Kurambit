@@ -605,7 +605,6 @@ const make = Effect.gen(function* () {
               "art/scripts",
               "art/previews",
               ...engineProfile(createEngine(input)).scaffold.directories,
-              "builds/linux",
             ])
               await NodeFSP.mkdir(NodePath.join(root, relative), { recursive: true });
             for (const [relative, contents] of Object.entries(scaffoldFiles(input))) {

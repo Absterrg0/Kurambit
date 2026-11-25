@@ -68,14 +68,7 @@ const SELECTED_BUILD_FILE = "builds/web-selected.json";
  */
 const buildPathsInGame = (root: string) =>
   Effect.forEach(
-    [
-      CANDIDATE_BUILDS_DIRECTORY,
-      WEB_BUILD_DIRECTORY,
-      "builds/linux",
-      "builds/windows",
-      WEB_PACKAGES_DIRECTORY,
-      SELECTED_BUILD_FILE,
-    ],
+    [CANDIDATE_BUILDS_DIRECTORY, WEB_BUILD_DIRECTORY, WEB_PACKAGES_DIRECTORY, SELECTED_BUILD_FILE],
     (relative) => inGame(root, relative),
     { discard: true },
   );
