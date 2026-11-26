@@ -18,7 +18,6 @@ import {
   CopyIcon,
   PaletteIcon,
   DownloadIcon,
-  FilmIcon,
   FolderOpenIcon,
   PanelRightIcon,
   PanelTopCloseIcon,
@@ -220,10 +219,6 @@ const changedSincePhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, un
   const build = result.value.builds.find((each) => each.id === result.value.current);
   return build === undefined ? null : buildPhrase(build.name);
 };
-
-const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
-  AsyncResult.isSuccess(result) &&
-  result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
 /**
  * The widest the game's column grows: the chat's readable width from the Chat width setting, the
@@ -647,7 +642,6 @@ function ThreadGameStage({
       : undoName;
   const redoLabel = redoName !== null && turnUndoAllowed("redo") ? `Redo ${redoName}` : "Redo";
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
-  const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
   // The turn making the game's first build. Nothing plays yet, so the Stage follows the agent's
   // saves: each one's frame loads unseen, and the first that draws takes the Stage (GamePlaySurface
@@ -1571,7 +1565,14 @@ function ThreadGameStage({
           {/* What plays on the Stage, as a button that opens the game's History. Nothing names
               builds before the first one exists: the Stage says what is being made. */}
           <span className={historyLabel === null ? "hidden" : "contents"}>
-            <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
+            <Popover
+              open={historyOpen}
+              onOpenChange={(open) => {
+                setHistoryOpen(open);
+                // The reel is what Keep going did, asked for once: History opens without it.
+                if (!open) setReelOpen(false);
+              }}
+            >
               <PopoverTrigger
                 render={
                   <Button
@@ -1881,12 +1882,6 @@ function ThreadGameStage({
                       Rebuild the web export
                     </MenuItem>
                   </>
-                ) : null}
-                {hasSteps ? (
-                  <MenuItem onClick={() => setReelOpen(!reelOpen)}>
-                    <FilmIcon />
-                    {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
-                  </MenuItem>
                 ) : null}
                 <MenuItem onClick={() => setGameHidden(true)}>
                   <PanelTopCloseIcon />
