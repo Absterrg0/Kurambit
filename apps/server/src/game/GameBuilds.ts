@@ -1408,9 +1408,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * What a build did, in a line, and keep going's key for it: a turn's reply's first sentence
-   * (its request's when it has none), a step's own key or the key of the request as a `Next:`
-   * line; tuned values as the decisions kept them.
+   * What a build did, in a line, and keep going's key for it: a step's own line, else a turn's
+   * reply's first sentence (its request's when it has none), a step's own key or the key of the
+   * request as a `Next:` line; tuned values as the decisions kept them.
    */
   const whatBuildDid = (g: Game, entry: Entry) =>
     Effect.gen(function* () {
@@ -1444,7 +1444,8 @@ const make = Effect.gen(function* () {
           ? undefined
           : (yield* stepsOf(new Set([source.threadId]))).get(RunId.make(source.runId));
       return {
-        text: reply !== "" ? reply : source.step?.move || entry.summary,
+        // A step is named by its record: a turn the time cap cut off ends on a progress line.
+        text: source.step?.move || reply || entry.summary,
         key: step !== undefined && step.key !== "" ? step.key : nextKey(request),
       };
     });

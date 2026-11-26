@@ -1362,7 +1362,10 @@ function WhatChanged({
       : null,
   );
   const source = build.source;
+  // A keep-going step's build is named by its step: a step the time cap cut off ends on a
+  // progress line ("Rendering a review of the Blender queen."), never on what it changed.
   const headline =
+    (source._tag === "turn" && source.step !== null ? buildCaption(build) : null) ??
     (reply === undefined ? null : firstSentence(reply.text)) ??
     (source._tag === "version"
       ? source.approach.trim() || source.request.trim()
