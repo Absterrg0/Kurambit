@@ -1,7 +1,11 @@
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off -- Drives a headless page in real time, as GameThreeEngine does. Reads the probe's own stills to compare and measure them.
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off -- Drives a headless page, as GameThreeEngine does. Reads the probe's own stills to compare and measure them.
 // The first minute as a player meets it (GamePlayerReport): the page opened as a player opens it,
 // no `?play`, pressed as a person would press it. No model call: every reading is the page's own
 // clock, DOM and audio graph, or the pixels of a still. What cannot be read says why.
+// Once the opening is read, play moves on the run's own clock (shell.js harnessClock), stepped as
+// fast as the page allows: a press's wait, the seconds to play, ten seconds of play and the end
+// screen are the game's seconds, the same on any machine. On real time a software renderer runs
+// the game at a fraction of its speed while the probe's reads wait on its frames.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { PNG } from "pngjs";
@@ -17,18 +21,18 @@ const WALL_PLAY_MS = 10_000;
 /** The no-input run: a loss within this much game time is "can be lost early". */
 const IDLE_SECONDS = 120;
 const IDLE_WALL_MS = 30_000;
-/** A sound within this long of the first input answers it. */
+/** A sound within this much game time of the first input answers it. */
 const ANSWER_MS = 1_000;
 const SIZES = { text1080: [1920, 1080], text800: [1280, 800] } as const;
 const BOOT_MS = 30_000;
 
 /**
- * Before any script: when the page was ready (its first frame drawn), every key and pointer press, every
- * sound that started (Web Audio sources and media elements), and the mix's sample peak, read by
- * an analyser placed between the graph and the speakers.
+ * Before any script: when the page was ready (its first frame drawn), how many sounds started (Web
+ * Audio sources and media elements), and the mix's sample peak, read by an analyser placed between
+ * the graph and the speakers.
  */
 export const PLAYER_PROBE = `(() => {
-  const kp = { ready: null, played: null, inputs: [], sounds: [], peak: 0, graph: false };
+  const kp = { ready: null, played: null, sounds: 0, peak: 0, graph: false };
   window.__kp = kp;
   const raf = window.requestAnimationFrame.bind(window);
   const watch = () => {
@@ -37,10 +41,8 @@ export const PLAYER_PROBE = `(() => {
     if (kp.ready === null || (kp.played === null && performance.now() < ${BOOT_MS})) raf(watch);
   };
   raf(watch);
-  for (const type of ["keydown", "pointerdown"])
-    window.addEventListener(type, () => kp.inputs.push(performance.now()), { capture: true });
   if (typeof AudioNode === "undefined") return;
-  const started = () => kp.sounds.push(performance.now());
+  const started = () => (kp.sounds += 1);
   const start = AudioScheduledSourceNode.prototype.start;
   AudioScheduledSourceNode.prototype.start = function (...args) {
     started();
@@ -128,7 +130,7 @@ const TEXT = `(() => {
   return { words, text, smallest };
 })()`;
 
-const STATE = `({ state: window.__studio?.getState?.()?.gameState?.state ?? null, now: performance.now() })`;
+const STATE = `({ state: window.__studio?.getState?.()?.gameState?.state ?? null, sounds: window.__kp?.sounds ?? 0 })`;
 
 /** Where a person would click to go on: the visible button or link whose words say so. */
 const buttonAt = (words: string) => `(() => {
@@ -144,8 +146,7 @@ type Kp = {
   readonly ready: number | null;
   /** When the page first said it was in play (its <body data-state>). */
   readonly played: number | null;
-  readonly inputs: ReadonlyArray<number>;
-  readonly sounds: ReadonlyArray<number>;
+  readonly sounds: number;
   readonly peak: number;
   readonly graph: boolean;
 };
@@ -157,6 +158,8 @@ type Press =
 const not = (notMeasured: string) => ({ notMeasured });
 const round = (n: number, digits = 2) => Math.round(n * 10 ** digits) / 10 ** digits;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** A press: the sounds started before it, when (wall ms), and the game ms played since. */
+type Pressed = { readonly sounds: number; readonly at: number; readonly since: number };
 
 const pixels = async (path: string) => PNG.sync.read(await NodeFSP.readFile(path));
 
@@ -206,7 +209,26 @@ export const measurePlayer = async (
     return answered !== undefined && "value" in answered ? (answered.value as A) : null;
   };
   const kp = () => evaluate<Kp>("window.__kp");
-  const state = () => evaluate<{ state: string | null; now: number }>(STATE);
+  const state = () => evaluate<{ state: string | null; sounds: number }>(STATE);
+  let clocked = false;
+  /** Holds the run's clock, or lets it go. A shell without one plays on real time. */
+  const holdClock = async (on: boolean) => {
+    clocked =
+      (await evaluate<boolean>(
+        `typeof window.__studio?.holdClock === "function" && (window.__studio.holdClock(${on}), ${on})`,
+      )) === true;
+  };
+  /** `ms` of play: stepped on the held clock (a frame drawn only for a still), else slept. */
+  const play = async (ms: number, draw = false) => {
+    if (!clocked) {
+      await sleep(ms);
+      return ms;
+    }
+    const stepped = await evaluate<number>(
+      `window.__studio.advanceClock(${ms / 1000}, undefined, ${draw})`,
+    );
+    return (stepped ?? 0) * 1000;
+  };
   const still = async (name: string) => {
     const path = NodePath.join(folder, `first-minute-${name}.png`);
     return (await session.still(path)) ? await pixels(path).catch(() => null) : null;
@@ -231,13 +253,12 @@ export const measurePlayer = async (
   };
   /**
    * Presses as a person would, one kind at a time, until the game is playing: how many presses,
-   * the page's seconds from the first to play, the one that worked (null: none did) and when it
-   * was pressed. The probe's own reading between presses is never counted.
+   * the game's seconds from the first to play, the one that worked (null: none did) and what was
+   * heard before it. The probe's own reading between presses is never counted.
    */
   const pressUntilPlaying = async (presses: ReadonlyArray<Press>) => {
     let inputs = 0;
-    let first: number | null = null;
-    let last = 0;
+    let played = 0;
     for (const press of presses) {
       const at =
         "tap" in press
@@ -246,8 +267,9 @@ export const measurePlayer = async (
             ? { x: THREE_VIEWPORT.width / 2, y: THREE_VIEWPORT.height / 2 }
             : await evaluate<{ x: number; y: number }>(buttonAt(press.button));
       if (!("tap" in press) && at === null) continue;
-      const before = (await state())?.now ?? last;
-      first ??= before;
+      const sounds = (await state())?.sounds ?? 0;
+      const pressedAt = Date.now();
+      const from = played;
       inputs += 1;
       await session.input({
         held: [],
@@ -255,14 +277,17 @@ export const measurePlayer = async (
         clicks: at === null ? [] : [at],
       });
       for (let waited = 0; waited < PRESS_WAIT_MS; waited += 100) {
-        const now = await state();
-        last = now?.now ?? last;
-        if (now?.state === "playing")
-          return { inputs, seconds: (last - first) / 1000, by: press.by, pressedAt: before };
-        await sleep(100);
+        if ((await state())?.state === "playing")
+          return {
+            inputs,
+            seconds: played / 1000,
+            by: press.by,
+            pressed: { sounds, at: pressedAt, since: played - from } satisfies Pressed,
+          };
+        played += await play(100);
       }
     }
-    return { inputs, seconds: (last - (first ?? last)) / 1000, by: null, pressedAt: null };
+    return { inputs, seconds: played / 1000, by: null, pressed: null };
   };
 
   // Load and the first frame. Drawn in software, the time to it is the machine's, not the game's.
@@ -280,6 +305,7 @@ export const measurePlayer = async (
     first === null || second === null
       ? not("the page gave no picture")
       : changed(first, second) > 0.002;
+  await holdClock(true);
   await readText(true);
 
   // From the page as opened to play. A first run that already ended by itself still opened in play.
@@ -288,10 +314,10 @@ export const measurePlayer = async (
   const ready = "ready" in load ? load.ready : 0;
   let open: GamePlayerReport["open"];
   // The press a player's first sound should answer: the one that started play, or their first in it.
-  let answered: number | null = null;
+  let answered: Pressed | null = null;
   if (opened?.state === "playing" || endedAlone) {
     open = { inputs: 0, seconds: ready, by: "opens in play", started: true };
-    answered = (await state())?.now ?? null;
+    answered = { sounds: opened.sounds, at: Date.now(), since: 0 };
     await session.input({ held: [], taps: ["Space"], clicks: [] });
   } else if (opened?.state == null) open = not("the game's runtime does not say its state");
   else {
@@ -301,7 +327,7 @@ export const measurePlayer = async (
       { by: "a click on its start", button: "play|start|begin|continue|new game" },
       { by: "a click", centre: true },
     ]);
-    answered = started.pressedAt;
+    answered = started.pressed;
     open = {
       inputs: started.inputs,
       seconds: round(ready + started.seconds),
@@ -314,10 +340,17 @@ export const measurePlayer = async (
   // Ten seconds of play: its text, Esc, a frame of it, the text at the other sizes.
   let pause: GamePlayerReport["pause"] = not("play never started");
   let frame: GamePlayerReport["frame"] = not("play never started");
+  let answer: boolean | null = null;
   if (playing) {
-    const began = Date.now();
     await readText(false);
-    await sleep(1500);
+    // Game time in play: the press's first second (what it sounded like), then Esc at 1.5 s.
+    let inPlay = answered === null ? 0 : Math.max(0, ANSWER_MS - answered.since);
+    if (inPlay > 0) await play(inPlay);
+    // A sound the game asks for by its file loads on the browser's clock: a second of that too.
+    if (answered !== null) await sleep(answered.at + ANSWER_MS - Date.now());
+    const now = await state();
+    if (answered !== null && now !== null) answer = now.sounds > answered.sounds;
+    if (inPlay < 1500) inPlay += await play(1500 - inPlay);
     // A first run that ended by itself has no play left to hold or picture.
     if ((await state())?.state === "ended") {
       const why = "its first run ended by itself before the probe pressed Esc";
@@ -330,20 +363,24 @@ export const measurePlayer = async (
       pause = false;
       for (let waited = 0; waited < PRESS_WAIT_MS && !pause; waited += 100) {
         pause = (await state())?.state === "paused";
-        if (!pause) await sleep(100);
+        if (!pause) inPlay += await play(100);
       }
       for (const key of ["Escape", "KeyP", "Enter"]) {
         if ((await state())?.state !== "paused") break;
         await session.input({ held: [], taps: [key], clicks: [] });
-        await sleep(300);
+        await play(300);
       }
+      inPlay += await play(100, true);
       const shot = await still("play");
       frame = shot === null ? not("the page gave no picture") : light(shot);
     }
     await readText(true);
-    while (Date.now() - began < WALL_PLAY_MS) {
-      await sleep(2000);
+    while (inPlay < WALL_PLAY_MS) {
+      const stepped = await play(Math.min(2000, WALL_PLAY_MS - inPlay));
+      inPlay += stepped;
       await readText(false);
+      // Nothing moves it on (it ended, or paused itself): there is no more play to read.
+      if (stepped === 0) break;
     }
   }
 
@@ -352,10 +389,13 @@ export const measurePlayer = async (
   let idleEnded: GamePlayerReport["idleEnded"];
   let retry: GamePlayerReport["retry"] = not("play never started");
   if (playing && session.stepBot !== undefined) {
+    // The bot steps its own run, as fast as the page allows: a held clock would keep it still.
+    await holdClock(false);
     const ran = await session.stepBot("export function decide() { return []; }\n", {
       seconds: IDLE_SECONDS,
       wallMs: IDLE_WALL_MS,
     });
+    await holdClock(true);
     const outcome = (ran as { outcome?: { won: boolean; seconds: number } | null } | null)?.outcome;
     if (ran === "no-bot" || ran === null || outcome === undefined) {
       lost = not(
@@ -370,7 +410,7 @@ export const measurePlayer = async (
       if (lost) {
         // A person reads the end screen before pressing: an end screen that ignores keys for its
         // first moment (so a key held through the loss does not restart) is not a missed press.
-        await sleep(END_READ_MS);
+        await play(END_READ_MS);
         const back = await pressUntilPlaying([
           { by: "Enter", tap: "Enter" },
           { by: "Space", tap: "Space" },
@@ -388,16 +428,16 @@ export const measurePlayer = async (
     }
   }
 
+  await holdClock(false);
   // Sound: one within a second of the press that started play, and the loudest sample the mix reached.
   const heard = await kp();
-  const firstInput = answered ?? undefined;
   const sound: GamePlayerReport["sound"] =
     heard === null
       ? not("the probe did not answer")
-      : firstInput === undefined
+      : answer === null
         ? not("no input reached the page")
         : {
-            firstInput: heard.sounds.some((t) => t >= firstInput && t <= firstInput + ANSWER_MS),
+            firstInput: answer,
             peakDb: heard.graph && heard.peak > 0 ? round(20 * Math.log10(heard.peak), 1) : null,
           };
 
