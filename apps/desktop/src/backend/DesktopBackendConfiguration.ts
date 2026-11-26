@@ -292,6 +292,7 @@ const make = Effect.gen(function* () {
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
     const shellEnvironmentPrepared = yield* shellEnvironment.installIntoProcess;
+    yield* serverExposure.moveScannedPortIfTaken;
     return yield* resolvePrimaryStartConfig({
       ...shared,
       resourceMonitorPath,

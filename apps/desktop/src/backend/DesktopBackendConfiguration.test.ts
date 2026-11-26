@@ -49,6 +49,7 @@ const layerServerExposure = Layer.succeed(DesktopServerExposure.DesktopServerExp
     httpBaseUrl: new URL("http://127.0.0.1:4888"),
   }),
   configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
+  moveScannedPortIfTaken: Effect.void,
 } satisfies DesktopServerExposure.DesktopServerExposure["Service"]);
 
 function layerEnvironment(

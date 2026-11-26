@@ -5,7 +5,6 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
-import * as NetService from "@kurambit/shared/Net";
 import * as Crypto from "effect/Crypto";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -35,27 +34,10 @@ import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import * as HostProcess from "@kurambit/shared/HostProcess";
 
-const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
-const MAX_TCP_PORT = 65_535;
-const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
-
 const makeDesktopRunId = Crypto.Crypto.pipe(
   Effect.flatMap((crypto) => crypto.randomUUIDv4()),
   Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
 );
-
-export class DesktopBackendPortUnavailableError extends Schema.TaggedError<DesktopBackendPortUnavailableError>()(
-  "DesktopBackendPortUnavailableError",
-  {
-    startPort: Schema.Int,
-    maxPort: Schema.Int,
-    hosts: Schema.Array(Schema.String),
-  },
-) {
-  override get message(): string {
-    return `No desktop backend port is available on hosts ${this.hosts.join(", ")} between ${this.startPort} and ${this.maxPort}.`;
-  }
-}
 
 export class DesktopDevelopmentBackendPortRequiredError extends Schema.TaggedError<DesktopDevelopmentBackendPortRequiredError>()(
   "DesktopDevelopmentBackendPortRequiredError",
@@ -75,36 +57,12 @@ const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(functio
   configuredPort: Option.Option<number>,
 ) {
   if (Option.isSome(configuredPort)) {
-    return {
-      port: configuredPort.value,
-      selectedByScan: false,
-    } as const;
+    return { port: configuredPort.value, selectedByScan: false } as const;
   }
-
-  const net = yield* NetService.NetService;
-  for (let port = DEFAULT_DESKTOP_BACKEND_PORT; port <= MAX_TCP_PORT; port += 1) {
-    let availableOnEveryHost = true;
-
-    for (const host of DESKTOP_BACKEND_PORT_PROBE_HOSTS) {
-      if (!(yield* net.canListenOnHost(port, host))) {
-        availableOnEveryHost = false;
-        break;
-      }
-    }
-
-    if (availableOnEveryHost) {
-      return {
-        port,
-        selectedByScan: true,
-      } as const;
-    }
-  }
-
-  return yield* new DesktopBackendPortUnavailableError({
-    startPort: DEFAULT_DESKTOP_BACKEND_PORT,
-    maxPort: MAX_TCP_PORT,
-    hosts: DESKTOP_BACKEND_PORT_PROBE_HOSTS,
-  });
+  const port = yield* DesktopServerExposure.findFreeBackendPort(
+    DesktopServerExposure.DEFAULT_DESKTOP_BACKEND_PORT,
+  );
+  return { port, selectedByScan: true } as const;
 });
 
 const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupError")(function* (
@@ -190,11 +148,16 @@ const bootstrap = Effect.gen(function* () {
       : "using configured backend port",
     {
       port: backendPort,
-      ...(backendPortSelection.selectedByScan ? { startPort: DEFAULT_DESKTOP_BACKEND_PORT } : {}),
+      ...(backendPortSelection.selectedByScan
+        ? { startPort: DesktopServerExposure.DEFAULT_DESKTOP_BACKEND_PORT }
+        : {}),
     },
   );
 
-  yield* serverExposure.configureFromSettings({ port: backendPort });
+  yield* serverExposure.configureFromSettings({
+    port: backendPort,
+    scanned: backendPortSelection.selectedByScan,
+  });
   const backendConfig = yield* serverExposure.backendConfig;
   yield* logBootstrapInfo("bootstrap resolved backend endpoint", {
     baseUrl: backendConfig.httpBaseUrl.href,

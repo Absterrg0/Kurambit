@@ -180,6 +180,7 @@ const layerDesktopServerExposure = Layer.succeed(DesktopServerExposure.DesktopSe
     httpBaseUrl: new URL("http://127.0.0.1:3773"),
   }),
   configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
+  moveScannedPortIfTaken: Effect.void,
 } satisfies DesktopServerExposure.DesktopServerExposure["Service"]);
 
 const layerElectronMenu = Layer.succeed(ElectronMenu.ElectronMenu, {
