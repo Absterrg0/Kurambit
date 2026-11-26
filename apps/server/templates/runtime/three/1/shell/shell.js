@@ -45,7 +45,6 @@ import * as THREE from "../vendor/three.module.js";
 import { errors as studioErrors, installStudio, oldShellPage } from "./studio.js";
 import { createQa } from "./qa.js";
 import { createStageBridge, loadTuning } from "./stage-bridge.js";
-import { createSceneReport } from "./scene-report.js";
 import {
   GameState,
   loadProgress,
@@ -1110,17 +1109,6 @@ const bridge = createStageBridge({
 });
 onModelCopy(bridge.assetCopy);
 
-// Looks at the scene only once the harness starts a measured play (window.__studio.scene).
-const sceneReport = createSceneReport({
-  canvas,
-  gl: renderer.getContext(),
-  renderer,
-  view: () => (run === null ? null : view()),
-  player: () => run?.ctx.player ?? null,
-  bridge,
-  animation: (object) => animateShell.stateOf(object),
-});
-
 /** A named thing's record, by its Stage id or name (case aside), with a body to draw. */
 const thingNamed = (wanted) => {
   const lower = wanted.toLowerCase();
@@ -1174,7 +1162,6 @@ const studio = installStudio({
     return applyHold();
   },
   bridge,
-  scene: sceneReport,
   // A kept play, run again from its seed with its input at each step (shell/replay.js). A play
   // that pressed an action this build no longer has cannot be replayed: it says which.
   // `drawEvery`: a measuring replay draws one frame in that many. `at`: it stops and holds at
@@ -1310,9 +1297,6 @@ const straightToPlay =
 startRun({ title: !straightToPlay });
 
 last = performance.now();
-// The scene report's last sample, which ran after the previous draw: the measuring's own time
-// stays out of the frame times the performance fact and the render scale judge the game by.
-let measuredMs = 0;
 /** On a fast display, at most one draw this often, with slack for a frame's jitter. */
 const DRAW_EVERY_MS = 1000 / 60;
 const DRAW_SLACK_MS = 2;
@@ -1322,8 +1306,6 @@ let drawnMs = 0;
 let drawnDt = 0;
 renderer.setAnimationLoop((now) => {
   const elapsedMs = Math.max(now - last, 0);
-  const realMs = Math.max(elapsedMs - measuredMs, 0);
-  measuredMs = 0;
   const real = Math.min(elapsedMs / 1000, CATCH_UP_S);
   last = now;
   if (!held && !document.hidden) rate.frame(elapsedMs);
@@ -1419,7 +1401,7 @@ renderer.setAnimationLoop((now) => {
   // A frozen frame stays on the canvas; nothing redraws until something moves. A 120 Hz or
   // faster display still steps play every frame but draws only when a draw is due, about 60 a
   // second: each draw costs the whole GPU frame. A skipped draw stays owed (redraw stays set).
-  drawnMs += realMs;
+  drawnMs += elapsedMs;
   drawnDt += dt;
   const due = rate.step() > 1 / 110 || now >= nextDrawAt - DRAW_SLACK_MS;
   const drawing = redraw && run?.compiling !== true && due;
@@ -1449,7 +1431,6 @@ renderer.setAnimationLoop((now) => {
     drawnDt = 0;
   }
   bridge.tick(dt);
-  measuredMs = sceneReport.tick(dt, drawing);
   // The run's state on the page, so a game's own CSS can show its screens by it.
   if (document.body.dataset.state !== GameState.state)
     document.body.dataset.state = GameState.state;

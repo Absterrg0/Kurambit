@@ -1018,7 +1018,7 @@ export async function createLook(canvas, options = {}) {
       dome.name = "Sky";
       dome.renderOrder = -1e9;
       dome.frustumCulled = false;
-      // Part of the sky, never of the world: rays (the scene report, the Stage's picking) pass.
+      // Part of the sky, never of the world: the Stage's picking rays pass.
       dome.raycast = () => {};
       scene.add(dome);
       domes.set(scene, dome);

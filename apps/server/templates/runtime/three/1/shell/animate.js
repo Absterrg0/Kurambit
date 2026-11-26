@@ -736,17 +736,4 @@ export const animateShell = {
       worstMs: Number(springCost.worstMs.toFixed(3)),
     };
   },
-  /** The state and clip an object's animator plays ({ state, clip }), or null: the scene report reads it. */
-  stateOf(object) {
-    for (const animator of live) {
-      const root = animator.root;
-      let related = root === object;
-      for (let node = root.parent; !related && node !== null; node = node.parent)
-        related = node === object;
-      for (let node = object.parent; !related && node !== null; node = node.parent)
-        related = node === root;
-      if (related) return { state: animator.state, clip: animator.clip };
-    }
-    return null;
-  },
 };

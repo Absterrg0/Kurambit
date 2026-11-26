@@ -15,7 +15,6 @@ import {
   toPlaywrightKey,
   type GameBrowser,
 } from "./gameChromium.ts";
-import { READ_SCENE, START_SCENE, type PageScene } from "./sceneReport.ts";
 import { chromiumChildEnv } from "./gameChromium.ts";
 import {
   PLAY_BOUNDS,
@@ -550,11 +549,6 @@ export interface WebPlaySession extends PlaySession {
   /** The window, the part of it the canvas covers and the HUD's reading (READ_SCREEN); null when the page did not answer. */
   readonly screen: () => Promise<unknown>;
   /**
-   * After `settle`: the scene report of a session opened with `sceneReport`; "no-shell" when the
-   * game's shell has none, null when it could not be read or was not asked for.
-   */
-  readonly scene: () => PageScene;
-  /**
    * The shell's QA play on a session opened with `qa` (shell/qa.js): every control, Retry,
    * and the HUD at the session's size and at a narrow 4:3, the page put back after. Null when
    * the page did not answer in time, "no-qa" when the shell has none.
@@ -579,7 +573,7 @@ export interface WebPlaySession extends PlaySession {
   /** The window at another size, as a player's would be; the page lays itself out again. */
   readonly resize: (width: number, height: number) => Promise<void>;
   /**
-   * Reads `perf` and `scene` now and keeps them, so the page can go on to other plays without
+   * Reads `perf` now and keeps it, so the page can go on to other plays without
    * changing them (`close` settles a session nothing settled).
    */
   readonly settle: () => Promise<void>;
@@ -627,8 +621,6 @@ export const openWebPlaySession = async (input: {
    * bots) gives such a page PLAY_BOUNDS.bootErrorGraceMs to show its bridge.
    */
   readonly stopOnPageError?: boolean | undefined;
-  /** Starts the shell's scene report once the page is ready; `scene()` has it after close. */
-  readonly sceneReport?: boolean | undefined;
   /** Turns the shell's QA counters on before any script runs, so `qa()` can play its QA play. */
   readonly qa?: boolean | undefined;
   /** Counts the bytes the page loads from the start, for `loadedBytes()`. */
@@ -966,15 +958,6 @@ export const openWebPlaySession = async (input: {
       if (Array.isArray(icons))
         input.onPageIcons(icons.filter((url): url is string => typeof url === "string"));
     }
-    // The scene report looks only at a measured play: started once the page is ready.
-    let sceneStarted: boolean | null = null;
-    if (input.sceneReport === true) {
-      const started = await bounded(
-        page.evaluate(START_SCENE).catch(() => false),
-        PLAY_BOUNDS.webCallMs,
-      );
-      sceneStarted = started === null ? null : started === true;
-    }
     const bootState = await readState(PLAY_BOUNDS.webCallMs);
     const bootProbe = sanitizeProbe(bootState === TIMED_OUT ? null : bootState);
     const bootConsole = drain();
@@ -1268,7 +1251,6 @@ export const openWebPlaySession = async (input: {
     const refused: Array<{ target: string; error: string }> = [];
     let kept: KeptStorage | null = null;
     let perf: unknown = null;
-    let scene: PageScene = input.sceneReport === true && sceneStarted === null ? "no-shell" : null;
     // How the play ran, read once: before more play on the same page (settle) or as it closes.
     const settle = once(async () => {
       if (endedWith === null) {
@@ -1282,26 +1264,6 @@ export const openWebPlaySession = async (input: {
           } catch {
             perf = null;
           }
-        if (sceneStarted === true) {
-          // Reading encodes up to eight frames as PNG on the page's main thread: 0.2 s on a
-          // GPU, over 3 s in software with a second play beside it (a build's idle and
-          // random-input plays), so it gets a still's bound, not one input's.
-          const report = await bounded(
-            page.evaluate(READ_SCENE).catch(() => null),
-            PLAY_BOUNDS.stillMs,
-          );
-          if (typeof report === "string")
-            try {
-              scene = { raw: JSON.parse(report) };
-            } catch {
-              scene = null;
-            }
-          // Its looks cost each frame: a play after this one on the page should not pay for them.
-          await bounded(
-            page.evaluate("window.__studio?.scene?.stop?.()").catch(() => undefined),
-            PLAY_BOUNDS.webCallMs,
-          );
-        }
       }
     });
     const session: WebPlaySession = {
@@ -1322,7 +1284,6 @@ export const openWebPlaySession = async (input: {
         );
         return read === TIMED_OUT ? null : read;
       },
-      scene: () => scene,
       replay: async (play, options) => {
         const answered = await bounded(
           page

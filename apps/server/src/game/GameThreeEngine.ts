@@ -47,7 +47,7 @@ import { copyRuntimeInto, hasRuntime } from "./gameRuntime.ts";
 import { gameLookJson, LOOK_ROUTE } from "./gameStyle.ts";
 import { copyTree } from "./gameFiles.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
-import { playRandomly } from "./sceneReport.ts";
+import { playRandomly } from "./playRandomly.ts";
 import { checkPerformance } from "./playPerf.ts";
 import { measurePlayer, PLAYER_PROBE } from "./playerProbe.ts";
 

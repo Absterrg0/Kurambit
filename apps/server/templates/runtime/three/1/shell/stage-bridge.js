@@ -2287,25 +2287,9 @@ export function createStageBridge({
     thing,
     tune,
     assetCopy,
-    /** Every registered thing ({ id, name, kind, object }), for the scene report; read only. */
+    /** Every registered thing ({ id, name, kind, object }); read only. */
     eachThing(fn) {
       for (const record of things.values()) if (record.part !== true) fn(record);
-    },
-    /** The thing an object is: never a part, which the scene report and the QA play do not count. */
-    thingOf(object) {
-      const record = byObject.get(object);
-      return record?.part === true ? undefined : record;
-    },
-    /**
-     * Where an object sits among the things, as a finding names it: its part's path ("Island ›
-     * Cabin") when it is in a part, else its thing's name; undefined outside every thing.
-     */
-    placeOf(object) {
-      for (let node = object; node != null; node = node.parent) {
-        const record = byObject.get(node);
-        if (record !== undefined) return record.path ?? record.name;
-      }
-      return undefined;
     },
     tick,
     overlay,

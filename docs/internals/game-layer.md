@@ -604,7 +604,7 @@ cannot both find none.
   action was read during one scripted run, and steps "fixing" it rebound a game's jump to Enter.
   Only health (boots, errors) undoes. A build is measured only for what a person acts on: it boots, the
   QA play and the game at phone and widescreen, one random-input play for errors, freezes and
-  frame rate. Endings with no or random input, motion, input response, the scene report's rows and
+  frame rate. Endings with no or random input, motion, input response, the scene report and
   asset counts were cut: nobody acted on them, and the plays cost minutes between steps.
 - **Nothing between steps waits on a play.** The look reads the facts measured on the folder's
   build so far, so step 1 starts at once from the newest `Next:`. The judge waits only for the

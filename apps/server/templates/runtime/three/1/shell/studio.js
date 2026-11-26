@@ -249,7 +249,6 @@ function position(player) {
  * `perf()` reads the look's play stats. `bridge`, when the shell has one
  * (shell/stage-bridge.js), is announced in studio-ready: a shell without it
  * posts the bare boot signal, and the Stage then offers no selecting.
- * `scene`, when the shell has one, is the scene report the harness reads.
  * `blank`: the game has no main.js yet (the server answers an empty module), so the page runs
  * nothing; studio-ready says so, and the Stage keeps waiting for a game to show.
  */
@@ -259,7 +258,6 @@ export function installStudio({
   hold,
   perf,
   bridge,
-  scene,
   qa,
   replay,
   bot,
@@ -294,16 +292,6 @@ export function installStudio({
     perf() {
       return typeof perf === "function" ? perf() : null;
     },
-    // The scene report (shell/scene-report.js): the harness starts it as a measured play
-    // begins and reads it at the end. A shell without one has no `scene`.
-    ...(scene === undefined
-      ? {}
-      : {
-          scene: {
-            start: () => scene.start(),
-            read: () => scene.read(),
-          },
-        }),
     // The QA play (shell/qa.js): every control, Retry, and the HUD on screen. Only the
     // harness calls it, on a page it opened with its counters on.
     ...(qa === undefined

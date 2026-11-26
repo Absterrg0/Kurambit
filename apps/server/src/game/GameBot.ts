@@ -2,7 +2,7 @@
 // The harness's own stepped bot (templates/bot-kit/masher.mjs) played in a checkout no thread owns:
 // a build's copy, for its facts. It plays inside the game's page on the run's own clock
 // (gameBotStep.ts); this service opens the page, bounds the run, keeps what the page recorded
-// (asset use, frame times, the scene report) beside its trace, and lets a stop end it.
+// (asset use, frame times) beside its trace, and lets a stop end it.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -28,7 +28,6 @@ import { makeGameBrowser } from "./gameChromium.ts";
 import { openPagePlay } from "./playLaunch.ts";
 import { encodePlayUse, PLAY_USE_FILE } from "./assetUse.ts";
 import { PLAY_PERF_FILE } from "./playPerf.ts";
-import { encodeSceneFile, keepSceneReport, SCENE_FILE } from "./sceneReport.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import { opError, type Session } from "./gameBotRuntime.ts";
 import { isSteppedBot, playSteppedBot, runWithoutBoot } from "./gameBotStep.ts";
@@ -203,7 +202,6 @@ const make = Effect.gen(function* () {
                   bootTimeoutMs: PLAY_BOUNDS.bootMs,
                   keptStorage: null,
                   recordUse: true,
-                  sceneReport: true,
                   runtimes,
                 }),
               ),
@@ -280,18 +278,6 @@ const make = Effect.gen(function* () {
                         `${JSON.stringify(perf)}\n`,
                       ).catch(() => undefined),
                     );
-                  // The scene report's frames go beside it, named from the run folder.
-                  const scene = stopped.scene;
-                  if (scene !== null)
-                    yield* Effect.promise(async () => {
-                      const kept =
-                        scene === "no-shell" ? scene : await keepSceneReport(scene.raw, runDir, "");
-                      if (kept !== null)
-                        await NodeFSP.writeFile(
-                          NodePath.join(runDir, SCENE_FILE),
-                          encodeSceneFile(kept),
-                        ).catch(() => undefined);
-                    });
                 }),
             ).pipe(
               // The game never booted: measured.

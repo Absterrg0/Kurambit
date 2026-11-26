@@ -15,7 +15,6 @@ import {
   type KeptStorage,
 } from "./webPlaySession.ts";
 import { type PlayUse, resolvePlayUse } from "./assetUse.ts";
-import type { PageScene } from "./sceneReport.ts";
 
 export interface PlayLaunch {
   readonly play: PlaySession;
@@ -35,8 +34,6 @@ export interface PlayLaunch {
     readonly use: PlayUse | null;
     /** How a page's play ran, as its shell measured it (`__studio.perf()`); null elsewhere. */
     readonly perf: unknown;
-    /** A page's scene report, when the launch asked for one (`sceneReport`); null elsewhere. */
-    readonly scene: PageScene;
   }>;
   readonly bootMs: number;
 }
@@ -81,8 +78,6 @@ export const openPagePlay = (input: {
   readonly keptStorage: string | null;
   /** Record which files the page loads and which sounds start playing (asset use). */
   readonly recordUse?: boolean;
-  /** Start the shell's scene report as the page is ready; `stop` returns it. */
-  readonly sceneReport?: boolean;
   /** The server's runtimes folder, for a game that loads Kurambit's runtime (gameRuntime.ts). */
   readonly runtimes: string | null;
 }): Effect.Effect<PlayLaunch, GameOperationError | PlayDidNotBoot> =>
@@ -122,7 +117,6 @@ export const openPagePlay = (input: {
                   input.recordUse === true
                     ? (urls) => urls.forEach((url) => icons.add(url))
                     : undefined,
-                sceneReport: input.sceneReport === true,
               }),
             // The page not booting or crashing is the game's; the browser is ours.
             catch: (cause) =>
@@ -144,7 +138,6 @@ export const openPagePlay = (input: {
             return {
               keptStorage: play.keptStorage(),
               perf: play.perf(),
-              scene: play.scene(),
               use:
                 input.recordUse === true
                   ? await resolvePlayUse({
