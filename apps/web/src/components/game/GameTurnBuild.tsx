@@ -67,10 +67,19 @@ export function GameTurnBuild({
   const build = view.build;
   const action = undo.action?.kind === "go-back" ? null : undo.action;
   const step = build.source._tag === "turn" ? build.source.step : null;
+  const undone = view.undone || step?.verdict === "undone";
+  // An undone build is out of the game: its settled checks still describe it, but whether it is
+  // still being measured, queued or never was is not worth a word after "Undone".
+  const said = [
+    step?.verdict != null ? stepVerdictText(step) : undone ? "Undone" : null,
+    undone && !factsSettled(build.facts) ? null : checksLine(build.facts),
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
   return (
     <div data-game-turn-build={build.id} className="mt-1.5 flex flex-col gap-1">
       <div className="-ms-2 flex min-w-0 items-center gap-x-0.5">
-        {step?.verdict === "undone" || undo.action?.kind === "redo" ? (
+        {undone ? (
           // Undone: its checks, good or not, describe a game the folder no longer holds.
           <Undo2Icon className="ms-2 size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
         ) : !factsSettled(build.facts) ? (
@@ -101,14 +110,7 @@ export function GameTurnBuild({
             showWorkbench("checks");
           }}
         >
-          <span className="truncate">
-            {step?.verdict != null
-              ? `${stepVerdictText(step)} · `
-              : undo.action?.kind === "redo"
-                ? "Undone · "
-                : ""}
-            {checksLine(build.facts)}
-          </span>
+          <span className="truncate">{said}</span>
         </Button>
         <span className="flex-1" />
         {filesButton}

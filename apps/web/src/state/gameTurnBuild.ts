@@ -22,6 +22,8 @@ export interface TurnBuildView {
    * page does not hold it). Set on the undone build, and on that undo while it is the latest.
    */
   readonly redo: { readonly undo: GameBuildId; readonly name: string | null } | null;
+  /** Its change is out of the game: a restore moved the folder off it, or an undo reversed it. */
+  readonly undone: boolean;
 }
 
 /**
@@ -63,6 +65,7 @@ export const turnBuildView = (
         : plainUndo
           ? { undo: build.id, name: reversed?.name ?? null }
           : null,
+    undone: build.undone || by !== undefined,
   };
 };
 

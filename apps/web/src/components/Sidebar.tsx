@@ -47,6 +47,7 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { gameEnvironment } from "../state/game";
+import { undoneAlone } from "../state/gameTurnBuild";
 import { allReachableShellsLiveAtom } from "../state/shell";
 import {
   readEnvironmentSupportsPinning,
@@ -147,7 +148,8 @@ const buildStateOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>
 const NO_BUILD_STATE = { broken: false, brokenBy: "" };
 
 /**
- * The newest build a chat's own turns made, as its row's quiet second line says it: "Build 4".
+ * The newest build a chat's own turns made, as its row's quiet second line says it: "Build 4", or
+ * "Build 4 undone".
  * One selector per chat, so the query hook sees a stable function across renders.
  */
 const buildLineSelectors = new Map<
@@ -166,7 +168,10 @@ const buildLineOf = (chatId: string) => {
         String(build.source.threadId) === chatId,
     );
     if (own === undefined || own.number === null) return null;
-    return `Build ${own.number}`;
+    // Undone, it is no longer the game's: History's rule (the server's restore, or an undo alone).
+    return own.undone || undoneAlone(result.value.builds).has(own.id)
+      ? `Build ${own.number} undone`
+      : `Build ${own.number}`;
   };
   buildLineSelectors.set(chatId, select);
   return select;
