@@ -19,16 +19,14 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { Button } from "../ui/button";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { Text } from "../ui/text";
 import { toastManager } from "../ui/toast";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { GameArrival } from "./useGameArrivals";
-import { GameRunMenu, GameRunTimeline, type StageRewind } from "./GameRunTimeline";
+import { GameRunMenu } from "./GameRunMenu";
 import {
   setStageMuted,
-  setStageSpeed,
   stageCannotLose,
   toggleStageCannotLose,
   toggleStageFreeze,
@@ -37,8 +35,6 @@ import {
 } from "./gameStageBridge";
 import type { StageRuns } from "./useStageRuns";
 
-const SPEEDS = [1, 0.5, 0.25] as const;
-const SPEED_WORDS: Record<(typeof SPEEDS)[number], string> = { 1: "1×", 0.5: "½×", 0.25: "¼×" };
 const NONE: ReadonlyArray<string> = [];
 
 /**
@@ -68,10 +64,9 @@ function useGameKey(command: "game.freeze" | "game.fullscreen" | "game.cannotLos
 }
 
 /**
- * The control bar under the Stage, one layout in every state: Play or Pause and Restart, the run's
- * timeline with its time in the middle while there is something to scrub (paused, or a run ended),
- * then speed, Can't lose, sound, fullscreen and the `⋯` menu. The buttons never move: only the
- * Play icon and the middle change. A control the game cannot use is disabled, not gone.
+ * The control bar under the Stage, one layout in every state: Play or Pause and Restart, then
+ * Can't lose, sound, fullscreen and the `⋯` menu. The buttons never move: only the Play icon and
+ * the words in the middle change. A control the game cannot use is disabled, not gone.
  */
 export function GameStageBar({
   threadRef,
@@ -80,7 +75,6 @@ export function GameStageBar({
   live,
   stopped,
   canReload,
-  rewind,
   runs,
   onRestart,
   onFullscreen,
@@ -95,15 +89,14 @@ export function GameStageBar({
   canLose: boolean;
   /** A game plays on the Stage (not a compare, not a state card). */
   playing: boolean;
-  /** It is the folder's own game, so its runs can be rewound. */
+  /** It is the folder's own game, the one the bridge speaks for (not a copy). */
   live: boolean;
   /**
-   * The game on the Stage doesn't run (it doesn't start): play's own controls are off and the
-   * time reads 0:00. Restart, fullscreen and the run's menu stay.
+   * The game on the Stage doesn't run (it doesn't start): play's own controls are off. Restart,
+   * fullscreen and the run's menu stay.
    */
   stopped: boolean;
   canReload: boolean;
-  rewind: StageRewind;
   runs: StageRuns;
   onRestart: () => void;
   onFullscreen: () => void;
@@ -121,7 +114,6 @@ export function GameStageBar({
   const capabilities = useThreadStageBridge(threadKey, (state) => state.capabilities, NONE);
   const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
   const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
-  const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
   const muted = useThreadStageBridge(threadKey, (state) => state.muted, false);
   // A game with no sound file has nothing to hear yet: said on the control, so a silent game
   // that is still being made is not taken for a broken one. Unknown until its files are read.
@@ -169,55 +161,14 @@ export function GameStageBar({
       >
         <RotateCcwIcon aria-hidden="true" />
       </Control>
-      <span className="w-2 shrink-0" aria-hidden="true" />
-      <GameRunTimeline
-        threadRef={threadRef}
-        cannotLose={canLose && cannotLose}
-        rewind={rewind}
-        ended={runs.ended !== null}
-        enabled={live && can("rewind")}
-      />
-      <span className="w-1 shrink-0" aria-hidden="true" />
-      <Menu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <MenuTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`Speed: ${SPEED_WORDS[speed as (typeof SPEEDS)[number]] ?? `${speed}×`}`}
-                    disabled={!can("speed")}
-                  />
-                }
-              />
-            }
-          >
-            <Text variant="label" tone="inherit" numeric>
-              {SPEED_WORDS[speed as (typeof SPEEDS)[number]] ?? `${speed}×`}
-            </Text>
-          </TooltipTrigger>
-          <TooltipPopup side="top">Speed</TooltipPopup>
-        </Tooltip>
-        <MenuPopup side="top" align="center">
-          <MenuRadioGroup
-            value={String(speed)}
-            onValueChange={(value) => {
-              const next = Number(value);
-              if (!Number.isFinite(next) || next <= 0) return;
-              setStageSpeed(next);
-              onFocus();
-            }}
-          >
-            {SPEEDS.map((each) => (
-              <MenuRadioItem key={each} value={String(each)}>
-                {SPEED_WORDS[each]}
-              </MenuRadioItem>
-            ))}
-          </MenuRadioGroup>
-        </MenuPopup>
-      </Menu>
+      {/* Can't lose, in muted words: the bar's one place for state. */}
+      <span className="flex min-w-0 flex-1 items-center justify-end px-2">
+        {canLose && cannotLose ? (
+          <Text variant="caption" tone="muted" render={<span className="shrink-0" />}>
+            Can't lose
+          </Text>
+        ) : null}
+      </span>
       {canLose ? (
         <Tooltip>
           <TooltipTrigger
@@ -279,7 +230,6 @@ export function GameStageBar({
       </Control>
       <GameRunMenu
         threadRef={threadRef}
-        rewind={rewind}
         runs={runs}
         playing={playing}
         live={live && !stopped}

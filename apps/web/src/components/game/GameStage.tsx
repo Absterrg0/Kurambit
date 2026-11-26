@@ -63,7 +63,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useStageRuns } from "./useStageRuns";
-import { useStageRewind } from "./GameRunTimeline";
+import { useStageResume } from "./GameRunMenu";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
@@ -509,7 +509,6 @@ function ThreadGameStage({
   const runs = useStageRuns(threadRef);
   const [playedRun, setPlayedRun] = useState<number | null>(null);
   const stageFrozen = useStageBridge((state) => state.frozen);
-  const rewind = useStageRewind(threadRef, runs.receive);
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
@@ -555,6 +554,7 @@ function ThreadGameStage({
   const [askedStatus, setAskedStatus] = useState<typeof query.data>(null);
   const [busy, setBusy] = useState<{ action: GameAction; startedAt: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const leaveStage = useStageResume(threadRef, runs.receive, setMessage);
   const [error, setError] = useState<string | null>(null);
   const [dismissedRevision, setDismissedRevision] = useState<number | null>(null);
   // The server keeps the last operation per game for the whole session, so the
@@ -1015,7 +1015,6 @@ function ThreadGameStage({
     // and the person can save it as a test play.
     if (studio.type === "studio-play" || studio.type === "studio-run-reset") {
       runs.receive(studio);
-      rewind.receive(studio);
       return;
     }
     if (studio.type === "studio-ready") {
@@ -1086,7 +1085,6 @@ function ThreadGameStage({
     pausedDone.current = pausedKey;
     freezeStage();
   }, [freezable, pausedKey]);
-  const leaveStage = rewind.leave;
   useEffect(() => {
     if (leavingKey !== null) void leaveStage().then(applyLeaving);
   }, [leavingKey, leaveStage, applyLeaving]);
@@ -1230,7 +1228,7 @@ function ThreadGameStage({
     },
   );
   // A reload into play first takes the run in play from the page, which the page that comes up
-  // replays to where it was (useStageRewind); the old page stays until it answered.
+  // replays to where it was (useStageResume); the old page stays until it answered.
   const leaving =
     frameFold !== null &&
     computed.key !== frameFold.key &&
@@ -1840,7 +1838,6 @@ function ThreadGameStage({
             live={stageKind === "live" && playTarget === null}
             stopped={folderDoesNotStart && failureVisible !== null && playTarget === null}
             canReload={stageKind === "live" && playTarget === null && data.previewUrl !== null}
-            rewind={rewind}
             runs={runs}
             onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
             onFullscreen={toggleFullscreen}

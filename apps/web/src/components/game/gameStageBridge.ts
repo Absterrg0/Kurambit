@@ -51,8 +51,6 @@ interface StageBridgeState {
   readonly frozen: boolean;
   readonly hover: { readonly id: string; readonly rect?: GameStageRect | undefined } | null;
   readonly selected: StageSelection | null;
-  /** How fast play runs (1 is the game's own pace), as the Stage last asked. */
-  readonly speed: number;
   /** The Stage silenced the game. */
   readonly muted: boolean;
   /** The game's actions and their keys, once asked for; null before. */
@@ -73,7 +71,6 @@ const EMPTY: Omit<StageBridgeState, "owner" | "post" | "hold"> = {
   frozen: false,
   hover: null,
   selected: null,
-  speed: 1,
   muted: false,
   controls: null,
   controlsNote: null,
@@ -521,14 +518,6 @@ export const rebindStageControl = (name: string, code: string) =>
 export const resetStageControls = () =>
   useStageBridge.getState().post?.({ type: "studio-controls-reset" });
 
-/** Slow motion and back: play time runs at `speed` of real time. */
-export const setStageSpeed = (speed: number) => {
-  const state = useStageBridge.getState();
-  if (state.post === null || !state.capabilities.includes("speed")) return;
-  state.post({ type: "studio-speed", value: speed });
-  useStageBridge.setState({ speed });
-};
-
 export const setStageMuted = (muted: boolean) => {
   const state = useStageBridge.getState();
   if (state.post === null || !state.capabilities.includes("mute")) return;
@@ -671,10 +660,4 @@ export const replayStageRun = (
     };
     post({ type: "studio-replay", id, ...request });
   });
-};
-
-/** A fresh run in play instead of the one on the Stage: "Start fresh". */
-export const startStageFresh = () => {
-  const { post, capabilities } = useStageBridge.getState();
-  if (post !== null && capabilities.includes("rewind")) post({ type: "studio-new-run" });
 };

@@ -267,12 +267,11 @@ once a build starts with a `Next:` line. A new tool, or a Workbench section the 
 something in it, carries a dot until you open it: one dot at a time, on the newest. Their keys and
 the command palette reach each one before then.
 
-The bar's buttons stay put while you play,
-pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
-lose**, sound, **Fullscreen**, and a **⋯** menu. **Can't lose** is there only for a game whose code
+The bar's buttons stay put while you play
+or pause: **Pause** (or **Play**) and **Restart**, then **Can't lose**, sound, **Fullscreen**, and a
+**⋯** menu. **Can't lose** is there only for a game whose code
 can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". While a
-game has no sound files, the sound button is dimmed and reads **No sound yet**. Paused, or once a run ends, the run's timeline and
-its time fill the middle. The **⋯** menu has the run (tell the agent about it, save it as a test
+game has no sound files, the sound button is dimmed and reads **No sound yet**. The **⋯** menu has the run (tell the agent about it, save it as a test
 play), what you see (the game's controls) and the Stage (pause when you click
 away, hide the game, stop it). The controls list every action with its keys, and a click on one
 changes its key; a game with the built-in follow camera lists **Look around** there: hold the right
@@ -386,7 +385,7 @@ what fills it:
   never rewinds this file.
 - **Test plays (three.js).** **Save as test play** in the bar's **⋯** menu saves a run under a name,
   such as a win or the run where a bug showed: the run that ended, or the one you are playing, up
-  to now or to where you rewound it, so a game with no ending has test plays too. Your first win is
+  to now, so a game with no ending has test plays too. Your first win is
   offered as one. Every build from then on replays it, and its checks say whether each test play
   still ends the same way, or for a run that never ended, whether it plays the same for its length. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
@@ -394,18 +393,11 @@ what fills it:
   list and delete them.
 - **Back where you were (three.js).** When your agent changes the game while you play, **Reload**
   (or **Play it** on a new build) brings the new game back to the moment you were at, replaying
-  your run on the changed code, and you play on from there; **Restart** starts over. Pause, and
-  hovering the bar's time says where the change first made play differ, or that the run now ends
-  earlier ("With the change, this run now ends at 1:40").
+  your run on the changed code, and you play on from there; **Restart** starts over. A line on the
+  game says where the change first made play differ, or that the run now ends earlier ("With the
+  change, this run now ends at 1:40").
   A run on a title screen, an ended run, and runs over 10 minutes start fresh instead, and so does
   one that takes over 20 seconds to get back to.
-- **Rewind and fork (three.js).** Paused, or after a run ends, the bar's timeline shows the run
-  with its losses and its ending marked. Drag or click it at any moment and let go: the game
-  pauses and replays your run to there, frozen. Change a value in **Tune** (or let your agent change the
-  code), then **Play on**: the run goes on from that second as a new run, which your agent hears
-  about and you can save as a test play, and the timeline marks the second it went on from. After a
-  fork with tuned values, **Replay as it was** in the bar's **⋯** menu plays the same three seconds
-  of your input without the change.
 - **Dev views (three.js).** The command palette's **Developer** commands step a frozen game one
   frame at a time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw
   the bounds of the game's named things, and show the frame rate in the game's corner. Each has a

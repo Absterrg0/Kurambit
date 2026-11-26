@@ -513,13 +513,13 @@ hand has no stamp, so only fresh sessions read it.
   pins `Math.random`, `performance.now` and `Date.now` to the run's seed and game time, and what
   a game reads outside that would make every reading noise. A changed ending is proposed as the
   next step and never undone (only health undoes): it may be the change the person asked for.
-- **Resume and rewind hand a replay over instead of ending it.** The Stage's `studio-replay`
+- **Resume hands a replay over instead of ending it.** The Stage's `studio-replay`
   replays a run to a step, then the shell turns the replay into the live run there, frozen: the
-  recorder continues from what was replayed (`continuation` in shell/replay.js), so a reloaded or
-  rewound run stays one recording that replays the same on that code. Before any reload into play
+  recorder continues from what was replayed (`continuation` in shell/replay.js), so a reloaded
+  run stays one recording that replays the same on that code. Before any reload into play
   the Stage takes the run from the old page (`studio-run-take`, the page then keeps nothing on
   leaving) and keeps it as left; the run that goes on shares its seed and clock and replaces it in
-  the agent's runs, while a fork carries `fork` and counts as a run of its own. A play keeps the
+  the agent's runs. A play keeps the
   starting value of each value tuned during it (`tunes`): without them a replay starts from the
   tune file, which already holds the tuned value, and the run can never replay the same.
 - **Game browsers draw on the GPU.** Once per server process, `makeGameBrowser` probes the pinned

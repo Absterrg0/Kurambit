@@ -24,7 +24,7 @@ import { refOf } from "./gameBuildRef";
 import { GameKeyArt } from "./GameKeyArt";
 import { requestStageControls, useThreadStageBridge } from "./gameStageBridge";
 import { stageDeviceAt } from "./gameStageDevice";
-import { clockLabel } from "./gameStageRewind";
+import { clockLabel } from "./gameStageResume";
 
 /**
  * The proof under each check in Checks: the frames a screen check took, the frame rate and what

@@ -90,7 +90,7 @@ import { colourHex } from "./GameColourField";
 import { GameDecisionsSection, SwatchText } from "./GameDecisions";
 import { chatTitle } from "./gameLibrary.logic";
 import { useThreadGameName } from "./GameName";
-import { clockLabel } from "./gameStageRewind";
+import { clockLabel } from "./gameStageResume";
 import { sameShape, stageDeviceAt } from "./gameStageDevice";
 import { clearStageConsole, type StageConsoleLine, useStageConsole } from "./gameStageWatch";
 import { Workbench } from "./GameWorkbenchParts";
