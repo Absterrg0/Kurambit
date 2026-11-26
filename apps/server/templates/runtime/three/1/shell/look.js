@@ -1279,6 +1279,11 @@ export async function createLook(canvas, options = {}) {
         bake,
         render: (scene, camera) => draw(scene, camera, 0),
         settings: look,
+        /**
+         * The browser draws on the CPU (no GPU on this machine): the person's Stage draws so
+         * too. `settings.quality` is already "low" here unless LOOK names one.
+         */
+        software: gpu.software,
       };
     },
     /** Moves each sun's shadow box to its target; the shell calls it every frame of play. */

@@ -789,6 +789,12 @@ function botInput(stepping) {
   } catch (error) {
     bot.error ??= `decide threw at ${stepping.time.toFixed(1)} s: ${error?.message ?? error}`;
   }
+  // `false` is the script's own stop (it reached what it came for): its budget ends here.
+  if (actions === false) {
+    bot.stopped = true;
+    bot.until = stepping.time;
+    actions = [];
+  }
   bot.decisions += 1;
   const keys = new Set();
   const buttons = new Set();
@@ -822,6 +828,7 @@ function finishBot(play, outcome) {
     wallMs: Math.round(nativeNow.call(performance) - bot.startedAt),
     error: bot.error ?? null,
     unknown: [...bot.unknown],
+    stopped: bot.stopped === true,
     where: mark(stepping.time, stepping.ctx.player, GameState),
     values: stateValues(),
     report: botReport(bot),
@@ -1231,6 +1238,9 @@ const studio = installStudio({
   },
   // The runs this page played to an end since the last call, for a harness session to keep.
   takePlays: () => finishedPlays.splice(0),
+  // What an agent's eval sees beside the page's globals: the run's ctx and GameState, which
+  // main.js holds in module scope, so no game needs a debug global for it.
+  scope: () => ({ ctx: run?.ctx ?? null, GameState }),
   // The harness's QA play: a retry is GameState.play()'s own startRun.
   qa: createQa({
     controls,
