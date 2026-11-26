@@ -1047,10 +1047,9 @@ function ThreadGameStage({
     // reload clears it by its frame key.
     if (studio.type === "studio-error") setStudioError({ key, text: studio.message });
   });
-  // Pointing at a thing on the Stage opens it in the Workbench's section as it is: Art opens its
-  // inspector, Tune brings its section into view (saying when it has no values), Checks stays. A
-  // pick never changes the section; a closed Workbench opens on the one it last showed (Tune for
-  // Checks, where a pick has nothing to show).
+  // Pointing at a thing on the Stage shows it in an open Workbench's section as it is: Art opens
+  // its inspector, Tune brings its section into view. A click on the game never opens the
+  // Workbench: the pick is the chip in the composer, and the panel is the person's to open.
   const selectedThing = useThreadStageBridge(
     threadKey,
     (state) => state.selected?.thing.id ?? null,
@@ -1059,11 +1058,10 @@ function ThreadGameStage({
   useEffect(() => {
     if (selectedThing === null) return;
     const thing = useStageBridge.getState().selected?.thing;
-    const workspace = useGameWorkspaceStore.getState();
     if (thing !== undefined)
-      workspace.setArtAsset(thing.asset?.path ?? `${CODE_MODEL_PREFIX}${thing.id}`);
-    if (!workspace.workbenchOpen)
-      showWorkbench(workspace.workbenchTab === "checks" ? "tune" : undefined);
+      useGameWorkspaceStore
+        .getState()
+        .setArtAsset(thing.asset?.path ?? `${CODE_MODEL_PREFIX}${thing.id}`);
   }, [selectedThing]);
   const takesRuns = useThreadStageBridge(
     threadKey,

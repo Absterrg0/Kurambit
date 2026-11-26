@@ -366,9 +366,9 @@ what fills it:
 - The Workbench and the right panel, where diffs and files open, are resizable; drag an edge, or
   close one to give the game more room.
 - **Point at a thing.** Press Ctrl+Alt+F (⌘⌥F on a Mac), even while you play, or the Stage's pause
-  button to freeze the game, then click a character or prop: the Workbench shows it in the section it has
-  open (its values in **Tune**, its inspector in **Art**), and it goes into the message box as a
-  chip with the frame. A new pick replaces that chip; chips you added with **Ask about this** stay. Sending sends the frame, what the thing is and its values with your words. The
+  button to freeze the game, then click a character or prop: it goes into the message box as a chip
+  with the frame, and an open Workbench shows it in its section (its values in **Tune**, its
+  inspector in **Art**). A new pick replaces that chip; chips you added with **Ask about this** stay. Sending sends the frame, what the thing is and its values with your words. The
   chip's **×** or Esc stops pointing; Esc again plays on. While frozen, the selected thing's path
   shows its last jumps on the game, so you can see what a tuned value did.
 - **Your agent knows how you played (three.js).** Your next message tells the agent about the

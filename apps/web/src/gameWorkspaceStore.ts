@@ -118,7 +118,8 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setPauseWhenAway: (on) => set({ pauseWhenAway: on }),
       workbenchOpen: false,
       setWorkbenchOpen: (open) => set({ workbenchOpen: open }),
-      workbenchTab: "tune",
+      // Checks first: what the last build did. Tune is a section the person opens for itself.
+      workbenchTab: "checks",
       setWorkbenchTab: (tab) => set({ workbenchTab: tab }),
       artAsset: null,
       setArtAsset: (asset) => set({ artAsset: asset }),
@@ -172,7 +173,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           gameHidden: saved?.gameHidden === true,
           pauseWhenAway: saved?.pauseWhenAway !== false,
           workbenchOpen: saved?.workbenchOpen === true,
-          workbenchTab: isWorkbenchTab(saved?.workbenchTab) ? saved.workbenchTab : "tune",
+          workbenchTab: isWorkbenchTab(saved?.workbenchTab) ? saved.workbenchTab : "checks",
         };
       },
     },
