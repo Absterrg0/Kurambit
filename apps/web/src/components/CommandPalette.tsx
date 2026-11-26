@@ -216,6 +216,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { gameEnvironment, stageAfterGameAction } from "../state/game";
+import { useComposerDraftStore } from "../composerDraftStore";
 import {
   useGameWorkspaceStore,
   type GameStageRequest,
@@ -2062,10 +2063,14 @@ function OpenCommandPaletteDialog(props: {
           ...(paused === undefined ? {} : { description: paused }),
           searchTerms: ["keep going", "resume", "continue", "autonomous", "autopilot", "game"],
           icon: <FastForwardIcon className={ITEM_ICON_CLASS} />,
-          // The composer's run picker says Keep going from now on, so Send steers it.
+          // What the composer holds is its direction, as Send with Keep going picked takes it;
+          // the picker says Keep going from now on, so Send adds to it.
           run: async () => {
             useGameWorkspaceStore.getState().pickRun(scopedThreadKey(threadRef), "keep-going");
-            await keepGoing.choose("on");
+            const drafts = useComposerDraftStore.getState();
+            const direction = drafts.getComposerDraft(threadRef)?.prompt ?? "";
+            if ((await keepGoing.choose("on", direction)) && direction.trim() !== "")
+              drafts.setPrompt(threadRef, "");
           },
         });
       if (keepGoingStatus.mode !== "off" && keepGoing.canOperate)
