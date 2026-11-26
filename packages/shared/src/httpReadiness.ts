@@ -38,6 +38,8 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
   readonly probeTimeoutMs?: number;
+  /** A 200 whose body this rejects counts as not ready yet and is retried. */
+  readonly accept?: (body: string) => Effect.Effect<boolean>;
   readonly makeError: (info: {
     readonly requestUrl: string;
     readonly probeTimeoutMs: number;
@@ -102,7 +104,20 @@ export const waitForHttpReady = Effect.fn("shared.httpReadiness.waitForHttpReady
         ),
       ),
     ),
-    HttpClient.tap((response) => response.text.pipe(Effect.ignore)),
+    HttpClient.tap((response) => {
+      const accept = input.accept;
+      if (accept === undefined) return response.text.pipe(Effect.ignore);
+      return response.text.pipe(
+        Effect.flatMap(accept),
+        Effect.orElseSucceed(() => false),
+        Effect.flatMap((accepted) =>
+          accepted ? Effect.void : Effect.fail(fail({ kind: "rejected-response", attempt })),
+        ),
+        Effect.tapError((cause) =>
+          Ref.set(lastProbeFailure, { attempt, cause: describeReadinessCause(cause) }),
+        ),
+      );
+    }),
     HttpClient.retry(retryPolicy),
   );
 

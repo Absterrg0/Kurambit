@@ -311,6 +311,40 @@ describe("DesktopBackendManager", () => {
     }),
   );
 
+  it.effect("readiness waits past another app's server answering on its port", () =>
+    Effect.gen(function* () {
+      const answers = ["other", "ours"];
+      const probes = yield* Ref.make(0);
+      const layer = Layer.merge(
+        TestClock.layer(),
+        layerHttpClient((request) =>
+          Ref.getAndUpdate(probes, (n) => n + 1).pipe(
+            Effect.map((n) =>
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json({ environmentId: answers[Math.min(n, answers.length - 1)] }),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const readiness = yield* DesktopBackendManager.waitForHttpReady({
+          executablePath: baseConfig.executablePath,
+          entryPath: baseConfig.entryPath,
+          cwd: baseConfig.cwd,
+          httpBaseUrl: baseConfig.httpBaseUrl,
+          timeout: Duration.seconds(5),
+          accept: (body) => Effect.succeed(body.includes('"ours"')),
+        }).pipe(Effect.forkChild);
+        yield* TestClock.adjust(Duration.millis(100));
+        yield* Fiber.join(readiness);
+        assert.equal(yield* Ref.get(probes), 2);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("reports bootstrap encoding failures with stable process context", () =>
     Effect.gen(function* () {
       const layerSpawner = Layer.succeed(

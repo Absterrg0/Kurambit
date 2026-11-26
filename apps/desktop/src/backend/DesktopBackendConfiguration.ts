@@ -240,6 +240,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       httpBaseUrl: backendExposure.httpBaseUrl,
       captureOutput: true,
       preflightFailure: Option.none(),
+      environmentIdPath: environment.path.join(environment.stateDir, "environment-id"),
     } satisfies DesktopBackendManager.DesktopBackendStartConfig;
   },
 );

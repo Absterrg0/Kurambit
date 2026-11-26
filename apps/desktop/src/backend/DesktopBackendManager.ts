@@ -72,6 +72,9 @@ export interface DesktopBackendStartConfig extends BackendProcessContext {
   readonly captureOutput: boolean;
   readonly preflightFailure: Option.Option<PreflightFailure>;
   readonly runningDistro?: string;
+  // Another app's backend can hold this port while ours boots or fails to bind
+  // it, so readiness only accepts a server reporting the id in this file.
+  readonly environmentIdPath?: string;
 }
 
 export interface PreflightFailure {
@@ -191,6 +194,7 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
     message: DesktopTelemetryControlMessageValue,
   ) => Effect.Effect<void>;
   readonly readinessTimeout?: Duration.Duration;
+  readonly acceptReadiness?: (body: string) => Effect.Effect<boolean>;
   readonly outputDrainTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
   readonly onExitObserved?: () => Effect.Effect<void>;
@@ -311,7 +315,10 @@ const closeRun = (
 };
 
 export const waitForHttpReady = (
-  options: BackendProcessContext & { readonly timeout: Duration.Duration },
+  options: BackendProcessContext & {
+    readonly timeout: Duration.Duration;
+    readonly accept?: (body: string) => Effect.Effect<boolean>;
+  },
 ): Effect.Effect<void, BackendReadinessTimeoutError, HttpClient.HttpClient> => {
   const readinessUrl = new URL(BACKEND_READINESS_PATH, options.httpBaseUrl);
   return waitForHttpReadyShared({
@@ -320,6 +327,7 @@ export const waitForHttpReady = (
     timeoutMs: Duration.toMillis(options.timeout),
     intervalMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_INTERVAL),
     probeTimeoutMs: Duration.toMillis(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
+    ...(options.accept === undefined ? {} : { accept: options.accept }),
     makeError: ({ cause }) =>
       new BackendReadinessTimeoutError({
         executablePath: options.executablePath,
@@ -371,6 +379,10 @@ function drainBackendOutput(
     }),
   );
 }
+
+const decodeEnvironmentDescriptor = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ environmentId: Schema.String })),
+);
 
 const encodeBootstrapJson = Schema.encodeEffect(Schema.fromJsonString(DesktopBackendBootstrap));
 const decodeDesktopTelemetryControlLine = Schema.decodeUnknownEffect(
@@ -553,6 +565,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       cwd: options.cwd,
       httpBaseUrl: options.httpBaseUrl,
       timeout: options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
+      ...(options.acceptReadiness === undefined ? {} : { accept: options.acceptReadiness }),
     }).pipe(
       Effect.flatMap(() => options.onReady?.() ?? Effect.void),
       Effect.as(true),
@@ -637,6 +650,17 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
     })),
   );
   const currentConfig = Ref.get(state).pipe(Effect.map((current) => current.config));
+
+  const reportsOwnEnvironment = (environmentIdPath: string) => (body: string) =>
+    fileSystem.readFileString(environmentIdPath).pipe(
+      Effect.map((environmentId) =>
+        Option.exists(
+          decodeEnvironmentDescriptor(body),
+          (descriptor) => descriptor.environmentId === environmentId.trim(),
+        ),
+      ),
+      Effect.orElseSucceed(() => false),
+    );
 
   const cancelRestart = Effect.gen(function* () {
     const restartFiber = yield* Ref.modify(state, (current) => [
@@ -864,8 +888,12 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           );
         });
 
+        const environmentIdPath = config.value.environmentIdPath;
         const program = runBackendProcess({
           ...config.value,
+          ...(environmentIdPath === undefined
+            ? {}
+            : { acceptReadiness: reportsOwnEnvironment(environmentIdPath) }),
           desktopTelemetryStream: desktopTelemetryPublisher.encoded,
           desktopBrowserStream: desktopBrowserHost.events,
           onDesktopBrowserCommand: desktopBrowserHost.handleCommandLine,
