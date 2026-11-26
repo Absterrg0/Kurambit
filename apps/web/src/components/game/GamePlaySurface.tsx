@@ -20,6 +20,7 @@ import {
 } from "@kurambit/contracts";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { rendererIsSoftware } from "../../lib/softwareRenderer";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
@@ -762,22 +763,6 @@ export function GameFrame({
     </>
   );
 }
-
-let softwareProbe: boolean | undefined;
-/**
- * Whether this renderer draws WebGL on the CPU (SwiftShader, llvmpipe): no usable GPU. A game
- * playing there takes most of the machine's cores, even on its title screen.
- */
-const rendererIsSoftware = () => {
-  if (softwareProbe === undefined) {
-    const gl = document.createElement("canvas").getContext("webgl");
-    const info = gl?.getExtension("WEBGL_debug_renderer_info");
-    const renderer =
-      gl == null || info == null ? "" : String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL));
-    softwareProbe = /swiftshader|llvmpipe|softpipe|software/i.test(renderer);
-  }
-  return softwareProbe;
-};
 
 /**
  * Over a game held while the person is elsewhere: the whole picture is the button, so the first

@@ -1,3 +1,5 @@
+import { rendererIsSoftware } from "./softwareRenderer";
+
 interface ObservedAnimation {
   element: HTMLElement | SVGElement;
   intersecting: boolean;
@@ -8,8 +10,12 @@ let observer: IntersectionObserver | null = null;
 let reducedMotion: MediaQueryList | null = null;
 
 function updateAnimation(animation: ObservedAnimation) {
+  // On a CPU renderer a running animation costs whole cores: it stands still, a static mark.
   const running =
-    animation.intersecting && document.visibilityState === "visible" && !reducedMotion?.matches;
+    animation.intersecting &&
+    document.visibilityState === "visible" &&
+    !reducedMotion?.matches &&
+    !rendererIsSoftware();
   animation.element.style.setProperty("--visible-animation-state", running ? "running" : "paused");
   animation.element.style.setProperty(
     "--visible-animation-will-change",

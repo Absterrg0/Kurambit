@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { observeVisibleAnimation } from "./visibleAnimation";
 
+let software = false;
+vi.mock("./softwareRenderer", () => ({ rendererIsSoftware: () => software }));
+
 let page = Object.assign(new EventTarget(), { visibilityState: "visible" });
 let motion = Object.assign(new EventTarget(), { matches: false });
 let observers: TestIntersectionObserver[] = [];
@@ -43,6 +46,7 @@ function attach(element: HTMLElement) {
 }
 
 beforeEach(() => {
+  software = false;
   page = Object.assign(new EventTarget(), { visibilityState: "visible" });
   motion = Object.assign(new EventTarget(), { matches: false });
   observers = [];
@@ -95,19 +99,24 @@ describe("observeVisibleAnimation", () => {
     expect(second.state()).toBe("running");
   });
 
-  it.each(["hidden", "reduced motion"])("starts paused with %s already active", (condition) => {
-    page.visibilityState = condition === "hidden" ? "hidden" : "visible";
-    motion.matches = condition === "reduced motion";
-    const animation = animationElement();
-    attach(animation.element);
-    observers[0]!.report(animation.element, true);
-    expect(animation.state()).toBe("paused");
+  it.each(["hidden", "reduced motion", "a software renderer"])(
+    "starts paused with %s already active",
+    (condition) => {
+      page.visibilityState = condition === "hidden" ? "hidden" : "visible";
+      motion.matches = condition === "reduced motion";
+      software = condition === "a software renderer";
+      const animation = animationElement();
+      attach(animation.element);
+      observers[0]!.report(animation.element, true);
+      expect(animation.state()).toBe("paused");
 
-    page.visibilityState = "visible";
-    motion.matches = false;
-    page.dispatchEvent(new Event("visibilitychange"));
-    expect(animation.state()).toBe("running");
-  });
+      page.visibilityState = "visible";
+      motion.matches = false;
+      software = false;
+      page.dispatchEvent(new Event("visibilitychange"));
+      expect(animation.state()).toBe("running");
+    },
+  );
 
   it("shares observers, releases the final ref, and ignores late callbacks after remount", () => {
     const addVisibility = vi.spyOn(page, "addEventListener");

@@ -27,7 +27,6 @@ import {
   FileVideoIcon,
   FlagIcon,
   ImageIcon,
-  LoaderCircleIcon,
   MinusIcon,
   MoreHorizontalIcon,
   PlayIcon,
@@ -53,6 +52,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
+import { Spinner } from "../ui/spinner";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
@@ -497,7 +497,7 @@ function BuildChecks({
             <TooltipPopup side="left">Measure again</TooltipPopup>
           </Tooltip>
         ) : busy ? (
-          <LoaderCircleIcon className="me-1.5 size-3.5 animate-spin text-muted-foreground" />
+          <Spinner size="sm" tone="muted" className="me-1.5" />
         ) : undefined
       }
     >
@@ -1135,7 +1135,7 @@ function SavedPlays({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: G
               aria-label={`Replay ${play.name} on the Stage`}
             >
               {busy === play.name ? (
-                <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+                <Spinner aria-hidden="true" />
               ) : (
                 <PlayIcon aria-hidden="true" />
               )}
