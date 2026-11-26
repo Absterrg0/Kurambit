@@ -722,9 +722,11 @@ const make = Effect.gen(function* () {
             ...(runtime === null ? {} : { runtime }),
           };
         }
+        // An agent's final game_check of these very files is this build's boot check and saved
+        // plays' replay (GameEngine.finalCheckOf): the measure takes them and plays neither again.
+        const checked =
+          tiers.has("boots") || tiers.has("replays") ? yield* engines.finalCheckOf(copy) : null;
         if (tiers.has("boots")) {
-          // A clean game_check of these very files already booted them (GameEngine.cleanCheckOf).
-          const checked = yield* engines.cleanCheckOf(copy);
           const facts =
             checked !== null
               ? {
@@ -806,28 +808,35 @@ const make = Effect.gen(function* () {
           // Each replay is announced as it starts: a bring-in's check counts them for the person.
           const of = Math.min(saved.plays.length, SAVED_PLAYS_PER_BUILD);
           let replaying = 0;
+          const replayed =
+            checked?.savedPlays?.status === "measured" &&
+            checked.savedPlays.reading.set === saved.set
+              ? checked.savedPlays.reading
+              : null;
           yield* write({
             savedPlays:
               saved.plays.length === 0
                 ? NONE_SAVED
-                : (unstarted ??
-                  (yield* replaySavedPlays(saved, (play) =>
-                    announce(
-                      `Build ${build.build.slice(0, 8)}: test play ${(replaying += 1)} of ${of}.`,
-                    ).pipe(Effect.andThen(step(engines.replayIn(copy, play)))),
-                  ).pipe(
-                    Effect.map((value) => ({ status: "measured" as const, value })),
-                    Effect.catchTags({
-                      GameOperationError: (error) =>
-                        Effect.succeed(
-                          faultOf(error) ??
-                            notMeasured(
-                              `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
-                              false,
-                            ),
-                        ),
-                    }),
-                  ))),
+                : replayed !== null
+                  ? { status: "measured", value: replayed }
+                  : (unstarted ??
+                    (yield* replaySavedPlays(saved, (play) =>
+                      announce(
+                        `Build ${build.build.slice(0, 8)}: test play ${(replaying += 1)} of ${of}.`,
+                      ).pipe(Effect.andThen(step(engines.replayIn(copy, play)))),
+                    ).pipe(
+                      Effect.map((value) => ({ status: "measured" as const, value })),
+                      Effect.catchTags({
+                        GameOperationError: (error) =>
+                          Effect.succeed(
+                            faultOf(error) ??
+                              notMeasured(
+                                `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
+                                false,
+                              ),
+                          ),
+                      }),
+                    ))),
           });
         }
         yield* Deferred.succeed(booted, undefined);
