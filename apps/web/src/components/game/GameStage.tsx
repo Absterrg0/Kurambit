@@ -1058,6 +1058,16 @@ function ThreadGameStage({
   useEffect(() => {
     if (leavingKey !== null) void leaveStage().then(applyLeaving);
   }, [leavingKey, leaveStage, applyLeaving]);
+  // The held build the person pressed Play it (or Reload) for: they asked to play, so its frame
+  // takes the keyboard once it is on the Stage. A focus request made before it mounted is the old
+  // frame's (GameFrame), and a frame nobody gave the keyboard waits behind Click to play.
+  const playAsked = useRef<string | null>(null);
+  const shownKey = frameFold?.key ?? null;
+  useEffect(() => {
+    if (playAsked.current === null || playAsked.current !== shownKey) return;
+    playAsked.current = null;
+    handleRequest({ kind: "focus" }, Date.now());
+  }, [shownKey, handleRequest]);
 
   if (!data)
     return query.error !== null && isGameStatusFailure(query.failure) ? (
@@ -1757,7 +1767,11 @@ function ThreadGameStage({
             onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
             onOpenTools={() => void navigate({ to: "/settings/game-tools" })}
             held={held}
-            onTakeHeld={() => showFold(playHeldFrame(frame))}
+            onTakeHeld={() => {
+              const next = playHeldFrame(frame);
+              playAsked.current = next.key;
+              showFold(next);
+            }}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
             bridge={{ threadKey, enabled: engine?.stageBridge === true }}

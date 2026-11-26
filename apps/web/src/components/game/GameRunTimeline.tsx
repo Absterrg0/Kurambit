@@ -133,6 +133,11 @@ export function useStageRewind(threadRef: ScopedThreadRef, keep: (message: Studi
     setSide(null);
     setNotice(resumeNotice(run.play, replayed));
     setTimeline({ play: run.play, at: replayed.seconds ?? null, fork: null });
+    // The page hands a replay over frozen, the person's own pause for pointing at things, where
+    // the first click picks. Coming back after a reload is no such pause: the run plays on, and
+    // the Stage holds it as it holds any game (Click to play while the person is elsewhere).
+    const bridge = useStageBridge.getState();
+    if (bridge.owner === run.owner && bridge.frozen) toggleStageFreeze();
   });
   useEffect(() => {
     if (ready) void resume();
