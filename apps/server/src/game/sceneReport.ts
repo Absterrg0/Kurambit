@@ -134,12 +134,6 @@ export const keepSceneReport = async (
 export const encodeSceneFile = (scene: GameSceneReport | "no-shell") =>
   `${writeSceneFile(scene === "no-shell" ? { shell: "none" } : scene)}\n`;
 
-/** Why there is no scene report: the shell predates it. */
-export const SCENE_OLD_SHELL = "the game's shell predates scene reports";
-
-/** How long game_check plays the gameplay entry for its scene report. */
-export const SCENE_CHECK_PLAY_MS = 6_000;
-
 // The masher's verbs (templates/bot-kit/masher.mjs): every shell's movement and action
 // keys, never Escape or P (pause).
 const DIRECTIONS = [

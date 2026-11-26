@@ -19,7 +19,6 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameCheckQa,
-  type GameCheckScene,
   type GameCheckScreens,
   type GameScreenSize,
   gameScreensFindings,
@@ -27,7 +26,6 @@ import {
   type GameModelSheet,
   type GameModelSheetResult,
   type GameProcessResult,
-  sceneLines,
 } from "@kurambit/contracts";
 import { inGame } from "./gamePath.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -49,13 +47,7 @@ import { copyRuntimeInto, hasRuntime } from "./gameRuntime.ts";
 import { gameLookJson, LOOK_ROUTE } from "./gameStyle.ts";
 import { copyTree } from "./gameFiles.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
-import {
-  keepSceneReport,
-  playRandomly,
-  SCENE_CHECK_PLAY_MS,
-  SCENE_OLD_SHELL,
-  type PageScene,
-} from "./sceneReport.ts";
+import { playRandomly } from "./sceneReport.ts";
 import { checkPerformance } from "./playPerf.ts";
 import { measurePlayer, PLAYER_PROBE } from "./playerProbe.ts";
 
@@ -137,40 +129,6 @@ const drawSheets = async (
     sheets.push({ ...drawn.value, image: NodePath.relative(root, image) });
   }
   return { sheets, missing, things };
-};
-
-/** The check's scene report, its frames kept in the check's own log folder. */
-const sceneOf = async (
-  play: { readonly page: PageScene; readonly ms: number } | null,
-  folder: string,
-  relative: string,
-  browser: GameBrowser,
-): Promise<GameCheckScene> => {
-  if (play === null)
-    return {
-      status: "not-measured",
-      why: "the gameplay entry did not open, so there was no play to look at",
-    };
-  if (play.page === "no-shell") return { status: "not-measured", why: SCENE_OLD_SHELL };
-  const report =
-    play.page === null
-      ? null
-      : await keepSceneReport(play.page.raw, folder, `${relative.split(NodePath.sep).join("/")}/`);
-  if (report === null)
-    return { status: "not-measured", why: "the page's scene report could not be read" };
-  return {
-    status: "measured",
-    lines: sceneLines(report).map((line) =>
-      line.frame === null ? line.text : `${line.text} [frame: ${line.frame}]`,
-    ),
-    report,
-    ms: play.ms,
-    ...(browser.software
-      ? {
-          note: `Drawn in software (${browser.renderer ?? "SwiftShader"}): this machine's GPU was not found, so the play ran slowly; what the report measures is the scene's geometry, which is the same.`,
-        }
-      : {}),
-  };
 };
 
 const decodeQa = Schema.decodeUnknownOption(GameQaReport);
@@ -411,8 +369,6 @@ export const makeThreeBackend = (
       if (gameplayUrl !== null && !input.look) entries.push(["gameplay", gameplayUrl]);
       // The entry whose page booting is the game booting.
       const bootEntry = entries[0]![0];
-      // The gameplay entry's play, measured by the shell's scene report: what it left, and how long it took.
-      let scenePlay: { readonly page: PageScene; readonly ms: number } | null = null;
       // What each entry looked like as the check left it: the agent judges its game from these.
       const views: Array<GameCheckView> = [];
       let playPerf: unknown = null;
@@ -430,7 +386,6 @@ export const makeThreeBackend = (
             try: async (signal) => {
               let timedOut = false;
               for (const [entry, entryUrl] of entries) {
-                const measure = input.scene && entry === "gameplay";
                 listen = onPageEvent;
                 const session = await openWebPlaySession({
                   browser,
@@ -440,7 +395,6 @@ export const makeThreeBackend = (
                   signal,
                   onPageEvent: (event) => listen(event),
                   stopOnPageError: true,
-                  sceneReport: measure,
                   ...(input.qa
                     ? entry === "boot"
                       ? { initScript: PLAYER_PROBE }
@@ -467,13 +421,9 @@ export const makeThreeBackend = (
                   let looking = input.look && entry === "gameplay";
                   // Closed even when a play is stopped part way: the session owns a browser.
                   try {
-                    const started = Date.now();
-                    // A short random-input play the scene report watches; without one (or with a
-                    // shell that has none, where nothing would watch it), one extra beat. Either
-                    // way late module errors still land in the listeners above.
-                    if (measure && session.scene() !== "no-shell")
-                      await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
-                    else if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
+                    // A look's short random-input play; otherwise one extra beat. Either way late
+                    // module errors still land in the listeners above.
+                    if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
                     else await new Promise((resolve) => setTimeout(resolve, 2000));
                     const view = NodePath.join(temporary, `view-${entry}.png`);
                     if (await session.still(view, true))
@@ -495,8 +445,7 @@ export const makeThreeBackend = (
                       }
                     }
                     await session.settle();
-                    if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
-                    if (measure || looking) playPerf = session.perf();
+                    if (looking) playPerf = session.perf();
                     if (input.qa && entry === "boot") {
                       listen = () => undefined;
                       const probed = Date.now();
@@ -587,11 +536,6 @@ export const makeThreeBackend = (
             ? `The page never reported ready (window.__studio.ready stayed false past ${BOOT_TIMEOUT_MS / 1000}s).`
             : "The page did not boot: window.__studio had not appeared when the page errored. Fix the errors this check lists, and keep the studio bridge from the starter.",
         });
-      const scene = input.scene
-        ? yield* Effect.promise(() =>
-            sceneOf(scenePlay, temporary, NodePath.relative(ctx.root, temporary), browser),
-          )
-        : undefined;
       const qa = qaPlay === null ? undefined : qaOf(qaPlay);
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
@@ -622,9 +566,8 @@ export const makeThreeBackend = (
         },
         issues: [...issues],
         run,
-        ...(scene === undefined ? {} : { scene }),
         views,
-        ...((input.scene || input.look) && reached.includes("gameplay")
+        ...(input.look && reached.includes("gameplay")
           ? { performance: checkPerformance(playPerf, browser) }
           : {}),
         ...(qa === undefined ? {} : { qa }),

@@ -20,7 +20,6 @@ import {
   type GameCheckIssue,
   type GameCheckResult,
   type GameCheckView,
-  type GameCheckScene,
   type GameCheckQa,
   type GameCheckScreens,
   type GameProcessResult,
@@ -112,8 +111,6 @@ export interface GameEngineCheckReport {
   /** Issues parsed from the check run's own stdout/stderr. */
   readonly issues: ReadonlyArray<GameCheckIssue>;
   readonly run: GameProcessResult;
-  /** The scene report of a check that asked for one, from an engine that measures it. */
-  readonly scene?: GameCheckScene;
   /** Pictures of the entries it ran, from an engine that can take them. */
   readonly views?: ReadonlyArray<GameCheckView>;
   /** How its play ran, and a warning when it missed 60 fps or spent more than a laptop has. */
@@ -171,9 +168,8 @@ export interface GameEngineBackend {
   >;
   /**
    * Boot check of the entries the engine boots: what the player opens first, then the
-   * gameplay entry. With `scene`, an engine that has a scene report plays the gameplay entry
-   * briefly with random input and returns it; with `qa`, one that has a QA play plays it, then
-   * the other screen sizes, and the first minute on the page as a player opens it. With `look`, an engine that can opens
+   * gameplay entry. With `qa`, an engine that has a QA play plays it, then the other screen
+   * sizes, and the first minute on the page as a player opens it. With `look`, an engine that can opens
    * only the gameplay entry for a moment of play and returns its frame, errors and frame rate:
    * the agent's quick look between edits.
    */
@@ -181,7 +177,6 @@ export interface GameEngineBackend {
     ctx: GameEngineContext,
     input: {
       readonly gameplayScene: string;
-      readonly scene: boolean;
       readonly qa: boolean;
       readonly look: boolean;
     },
@@ -295,8 +290,8 @@ export class GameEngine extends Context.Service<
       owner?: string,
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
     /**
-     * The boot check of a checkout no thread owns (a build's copy), as its own
-     * operation; a build's facts read the scene from their own random-input play instead.
+     * The full check of a checkout no thread owns (a build's copy), as its own operation:
+     * the boot, the QA play, the other screen sizes and the first minute.
      */
     readonly checkIn: (
       root: string,
@@ -377,7 +372,6 @@ const make = Effect.gen(function* () {
     ctx: GameEngineContext,
     manifest: GameManifest,
     startedAt: number,
-    scene: boolean,
     qa: boolean,
     look: boolean,
   ) =>
@@ -392,7 +386,6 @@ const make = Effect.gen(function* () {
         return yield* sourceIdentityError(`${profile.displayName} check`, root, project, before);
       const executed = yield* backend.runCheck(ctx, {
         gameplayScene: manifest.gameplayScene ?? "",
-        scene,
         qa,
         look,
       });
@@ -446,20 +439,12 @@ const make = Effect.gen(function* () {
         ...(executed.qa === undefined ? {} : { qa: executed.qa }),
         ...(executed.screens === undefined ? {} : { screens: executed.screens }),
         ...(executed.player === undefined ? {} : { player: executed.player }),
-        ...(scene
-          ? {
-              scene: executed.scene ?? {
-                status: "not-measured" as const,
-                why: `${profile.displayName} games have no scene report yet; it is measured for three.js games`,
-              },
-            }
-          : {}),
       } satisfies GameCheckResult;
     });
 
   const check = Effect.fn("GameEngine.check")(function* (
     root: string,
-    options?: { readonly scene?: boolean; readonly qa?: boolean; readonly look?: boolean },
+    options?: { readonly qa?: boolean; readonly look?: boolean },
   ) {
     const startedAt = yield* Clock.currentTimeMillis;
     // A failure the game's own files cause (an unreadable game.json, an editor
@@ -489,7 +474,6 @@ const make = Effect.gen(function* () {
         ctx,
         manifest,
         startedAt,
-        options?.scene === true,
         options?.qa === true,
         options?.look === true,
       );
