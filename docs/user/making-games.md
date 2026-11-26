@@ -333,8 +333,8 @@ what fills it:
   each moved since the build before; the controls as their keys with what each did; the phone
   and widescreen pictures with **Open in responsive view**; the harness's own play to watch; your
   saved test plays with **Replay**. Checks not measured are one line that opens to each one's
-  reason. When the game logged errors or warnings, its **Console** follows, and the Checks button
-  counts the errors. Last come the game's **Decisions**. A build's checks in
+  reason. When the game logged errors or warnings, its **Console** follows with their counts
+  (**Show** opens its lines), and the Checks button counts the errors. Last come the game's **Decisions**. A build's checks in
   the chat open here. Opening a diff on a narrow window closes the Workbench to give the game room;
   open it again to see both.
 
@@ -491,8 +491,8 @@ To prove the game can be won, save a winning run as a test play (see **Test play
 build after it replays it and says whether it still ends the same.
 Opening or playing a build that was never measured measures it, and a three.js game measures its
 newest build in the background when a turn ends; a newer build stops the measure of an older one,
-which opening that build measures again. A check Kurambit could not measure says **Not measured**
-and why, and never counts as a result: if a tool failed, **Measure again** tries once more. Your
+which opening that build measures again. A check Kurambit could not measure is left out of the build's
+count and listed under **Not measured** in Checks with why, never as a result: if a tool failed, **Measure again** tries once more. Your
 agent sees the same builds and checks.
 
 ## Working in several chats at once

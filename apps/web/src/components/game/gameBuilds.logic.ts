@@ -125,27 +125,24 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
 
 /**
  * PURE. A build's checks in the words every surface uses, as Checks lists them: what is wrong
- * first ("1 problem · 6 pass"), else how many pass ("All 7 pass"), then what was not measured.
+ * first ("1 problem · 6 pass"), else how many pass ("All 7 pass"). What could not be measured is
+ * Checks' own folded line, never a count here: it says nothing about the game, and a headline
+ * full of it teaches people to skip the checks. "All" only when every lead check passed.
  * Null before any reading.
  */
 const checksPhrase = (facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">): string | null => {
   if (facts.good + facts.bad === 0) return null;
   const lead = facts.lead;
-  // Every lead check is accounted for: one with no reading is said, never left out of the count.
-  const notMeasured = lead?.measured === undefined ? 0 : lead.of - lead.measured.length;
-  const unread = notMeasured > 0 ? [`${notMeasured} not measured`] : [];
   // A build that does not start is its outcome, not one problem among passes.
-  if (lead !== undefined && doesNotStart({ lead }))
-    return ["Does not start", ...unread].join(" · ");
+  if (lead !== undefined && doesNotStart({ lead })) return "Does not start";
   const passes = lead?.pass ?? facts.good;
   const pass =
-    facts.bad === 0 && lead !== undefined && notMeasured === 0 && passes === lead.of
+    facts.bad === 0 && lead !== undefined && passes === lead.of
       ? `All ${passes} pass`
       : `${passes} pass`;
   return [
     ...(facts.bad > 0 ? [`${facts.bad} ${facts.bad === 1 ? "problem" : "problems"}`] : []),
     pass,
-    ...unread,
   ].join(" · ");
 };
 
@@ -411,13 +408,6 @@ export const doesNotStart = (summary: Pick<GameBuildFactsSummary, "lead">): bool
 /** PURE. A build's checks have settled: measured, with or without some not measured. */
 export const factsSettled = (summary: Pick<GameBuildFactsSummary, "state">): boolean =>
   summary.state === "measured" || summary.state === "incomplete";
-
-/**
- * PURE. How many more lead checks pass on `build` than on `before`, counted only over the
- * checks both measured: a check one build could not measure is no gain or loss. Null when
- * either build has not settled, or they share no measured check, so a build being measured
- * is never shown as better or worse.
- */
 
 /**
  * PURE. A build's checks in one line, as every surface says them: the count once they have

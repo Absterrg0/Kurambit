@@ -1531,10 +1531,12 @@ const CONSOLE_LINES = 120;
 
 /**
  * The game page's console as a plain log, newest at the bottom, with how many errors and
- * warnings it holds: only once the game logged an error or a warning.
+ * warnings it holds: only once the game logged an error or a warning. Folded to its counts until
+ * opened: a renderer's raw shader dump is for whoever chases it, not the build's checks.
  */
 function ChecksConsole({ threadKey }: { threadKey: string }) {
   const { lines, dropped } = useStageConsole(threadKey);
+  const [open, setOpen] = useState(false);
   const errors = lines.filter((line) => line.level === "error").length;
   const warnings = lines.filter((line) => line.level === "warn").length;
   if (errors === 0 && warnings === 0) return null;
@@ -1551,16 +1553,25 @@ function ChecksConsole({ threadKey }: { threadKey: string }) {
         .filter((part) => part !== null)
         .join(" · ")}
       aside={
-        <Button size="xs" variant="ghost" onClick={() => clearStageConsole(threadKey)}>
-          Clear
-        </Button>
+        <>
+          {open ? (
+            <Button size="xs" variant="ghost" onClick={() => clearStageConsole(threadKey)}>
+              Clear
+            </Button>
+          ) : null}
+          <Button size="xs" variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? "Hide" : "Show"}
+          </Button>
+        </>
       }
     >
-      <div className="flex flex-col gap-0.5 py-1">
-        {shown.map((line) => (
-          <LogLine key={line.n} line={line} />
-        ))}
-      </div>
+      {open ? (
+        <div className="flex flex-col gap-0.5 py-1">
+          {shown.map((line) => (
+            <LogLine key={line.n} line={line} />
+          ))}
+        </div>
+      ) : null}
     </Workbench.Section>
   );
 }
