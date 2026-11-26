@@ -285,6 +285,7 @@ import {
   WifiOffIcon,
 } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
+import { StatusDot } from "./ui/status-dot";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
@@ -4978,15 +4979,7 @@ export default function ChatView(props: ChatViewProps) {
       id: `background-work:${activeThread.id}`,
       variant: "default",
       priority: "activity",
-      icon: (
-        <span
-          className={cn(
-            "size-1.5 rounded-full bg-foreground",
-            presentation.waiting && "animate-status-pulse",
-          )}
-          aria-hidden="true"
-        />
-      ),
+      icon: <StatusDot tone="foreground" pulse={presentation.waiting} />,
       title: presentation.title,
       description:
         presentation.items.length === 1 && presentation.items[0]?.childThreadId === undefined
