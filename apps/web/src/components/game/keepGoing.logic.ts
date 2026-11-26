@@ -136,8 +136,8 @@ export const keepGoingBannerView = (
   if (status === null || status.runId === null || status.chat !== threadId) return null;
   const runId = status.runId;
   if (status.mode === "off") {
-    // Turned off by the person: the top bar's Keep going already says so.
-    if (status.ending === null || status.ending === "stopped") return null;
+    // Stop too: the person reads what the run did ("2 steps, 2 kept, 11 of 30 min").
+    if (status.ending === null) return null;
     if (
       lastTurnAt !== null &&
       status.endedAt !== null &&

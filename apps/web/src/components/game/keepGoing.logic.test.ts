@@ -152,8 +152,11 @@ describe("the keep-going banner", () => {
     expect(keepGoingBannerView(NEVER_RAN, MAIN_CHAT)).toBeNull();
   });
 
-  it("says nothing once the person turned it off", () => {
-    expect(keepGoingBannerView({ ...PAUSED_STALLED, ending: "stopped" }, MAIN_CHAT)).toBeNull();
+  it("says what the run did once the person stopped it", () => {
+    const message = "Keep going stopped. 2 steps, 2 kept, 11 of 30 min.";
+    expect(
+      keepGoingBannerView({ ...PAUSED_STALLED, ending: "stopped", message }, MAIN_CHAT),
+    ).toMatchObject({ kind: "paused", title: message });
   });
 
   it("hides the Next banner while on here", () => {

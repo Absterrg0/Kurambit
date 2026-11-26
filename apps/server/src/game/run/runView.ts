@@ -29,24 +29,30 @@ const budgetText = (minutes: number) =>
   minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} minutes`;
 const sentence = (text: string) => text.trim().replace(/[.\s]+$/, "");
 
-/** Why keep going stopped, in one plain line for the paused and done states. */
-const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string => {
+/** What a run did, for its last line: "2 steps, 2 kept, 11 of 30 min". */
+const tally = (run: GameRun, records: ReadonlyArray<StepRecord>): string => {
+  const kept = records.filter((r) => r.step.verdict !== "undone").length;
+  const used = Math.round((run.budgetUsedMs ?? 0) / 60_000);
+  return `${records.length} step${records.length === 1 ? "" : "s"}, ${kept} kept, ${run.budgetMinutes === null ? used : `${used} of ${run.budgetMinutes}`} min`;
+};
+
+/** Why keep going stopped and what it did, in one plain line for the paused and done states. */
+const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string =>
+  records.length === 0 ? endingWhy(run) : `${endingWhy(run)} ${tally(run, records)}.`;
+
+const endingWhy = (run: GameRun): string => {
   const why = sentence(run.lastFailure);
   switch (run.ending) {
     case null:
       return "";
     case "stopped":
-      return why === "" ? "Keep going is off." : `Keep going paused: ${why}.`;
+      return why === "" ? "Keep going stopped." : `Keep going paused: ${why}.`;
     case "stalled":
       return why === ""
         ? "Keep going paused: the last two steps kept nothing; each changed nothing or was undone. Tell your agent what to do next, or turn it on to try again."
         : `Keep going paused: ${why}. Tell your agent what to do next, or turn it on to try again.`;
-    case "budget": {
-      const kept = records.filter((r) => r.step.verdict !== "undone").length;
-      const spent =
-        run.budgetMinutes === null ? "its time" : `its ${budgetText(run.budgetMinutes)} of work`;
-      return `Keep going paused: ${spent} is up (${records.length} step${records.length === 1 ? "" : "s"}, ${kept} kept).`;
-    }
+    case "budget":
+      return `Keep going paused: ${run.budgetMinutes === null ? "its time" : `its ${budgetText(run.budgetMinutes)} of work`} is up.`;
     case "done":
       return "Keep going finished: your agent says the game is done. Ask it for more to keep going.";
     case "usage-limit":
