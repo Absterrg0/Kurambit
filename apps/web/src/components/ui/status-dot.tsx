@@ -4,6 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import type { ReactNode } from "react";
 
 import { Text } from "~/components/ui/text";
+import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 // Tones are the status hues. `neutral` is idle or unknown, `live` is vermilion
@@ -45,8 +46,9 @@ type StatusDotTone = NonNullable<VariantProps<typeof statusDotVariants>["tone"]>
 /**
  * A small state dot. Without a `label` the dot is decorative and the state must
  * be in nearby text; with one it becomes a focusable dot with a tooltip.
- * `pulse` and `ping` are duty-cycled (a few frames per cycle) and stop under
- * reduced motion; `framed` gives the dot a 12px box so rows of dots align.
+ * `pulse` and `ping` are duty-cycled (a few frames per cycle) and, as a spinner, stand still
+ * off screen, under reduced motion and on a software renderer; `framed` gives the dot a 12px box
+ * so rows of dots align.
  */
 function StatusDot({
   tone = "neutral",
@@ -66,10 +68,11 @@ function StatusDot({
   const dot = (
     <span
       aria-hidden
+      ref={pulse ? observeVisibleAnimation : undefined}
       className={statusDotVariants({
         size,
         tone,
-        className: pulse && "motion-safe:animate-status-pulse",
+        className: pulse && "motion-safe:visible-animate-status-pulse",
       })}
       data-slot="status-dot"
       data-tone={tone}
@@ -78,7 +81,8 @@ function StatusDot({
   const halo = ping ? (
     <span
       aria-hidden
-      className={`absolute inline-flex h-full w-full motion-safe:animate-status-ping rounded-full ${pingToneClassName[tone]}`}
+      ref={observeVisibleAnimation}
+      className={`absolute inline-flex h-full w-full motion-safe:visible-animate-status-ping rounded-full ${pingToneClassName[tone]}`}
     />
   ) : null;
 
