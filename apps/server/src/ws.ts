@@ -1798,14 +1798,6 @@ const layerWsRpc = (
                 GameRunControl.GameRunError.toOperationError("keep-going-status", cause),
               ),
             ),
-        [WS_METHODS.gameKeepGoingDecide]: (input) =>
-          gameRun
-            .decide(input.threadId, input)
-            .pipe(
-              Effect.mapError((cause) =>
-                GameRunControl.GameRunError.toOperationError("keep-going-decide", cause),
-              ),
-            ),
         [WS_METHODS.gameList]: () => gameProjects.list(),
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),

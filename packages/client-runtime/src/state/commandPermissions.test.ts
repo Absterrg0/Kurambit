@@ -67,7 +67,6 @@ describe("command permissions", () => {
           WS_METHODS.gameMediaSave,
           WS_METHODS.gameSavedDelete,
           WS_METHODS.gameKeepGoing,
-          WS_METHODS.gameKeepGoingDecide,
           WS_METHODS.gameBuildMeasure,
           WS_METHODS.gameBuildPlay,
           WS_METHODS.gameBuildRestore,

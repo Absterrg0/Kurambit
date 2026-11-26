@@ -127,7 +127,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     stepId: GameRunStepId,
     attempt: PositiveInt,
   }),
-  // Due when a Guided proposal's default would fire; game-run.decision.expire checks it again.
+  // A proposal an earlier Kurambit's Guided mode left waiting; game-run.decision.expire starts it.
   Schema.Struct({
     type: Schema.Literal("game-run.decision.deadline"),
     runId: GameRunId,

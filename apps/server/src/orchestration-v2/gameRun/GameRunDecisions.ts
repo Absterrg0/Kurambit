@@ -1,6 +1,5 @@
-// A Guided proposal's timed default: the deadline effect, due when the default
-// would fire (the outbox's availableAt), asks the run for it with
-// game-run.decision.expire. No fiber holds a proposal, so a restart keeps it.
+// A proposal an earlier Kurambit's Guided mode left waiting: its deadline effect, still in the
+// outbox, asks the run to start it with game-run.decision.expire.
 import { CommandId, type GameRunId, type GameRunStepId, type ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

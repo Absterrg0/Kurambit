@@ -11,8 +11,6 @@ import {
   type GameRunStep,
   type GameRunStepResult,
   gameRunStepId,
-  type GameKeepGoingDecideInput,
-  type GameKeepGoingDecideResult,
   type GameKeepGoingInput,
   type GameKeepGoingStatus,
   type GameKeepGoingSteerInput,
@@ -42,7 +40,6 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { recordDecision } from "./GameDecisions.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
 import {
   RESUMABLE,
@@ -93,15 +90,10 @@ export interface GameRunStepMark {
 }
 
 type Service = {
-  /** Off, Guided or Autopilot for the caller's chat: starts, resumes, switches or stops keep going. */
+  /** On or off for the caller's chat: starts, resumes, gives its direction or stops keep going. */
   readonly set: (threadId: ThreadId, input: GameKeepGoingInput) => Fails<GameKeepGoingStatus>;
   readonly status: (threadId: ThreadId) => Fails<GameKeepGoingStatus>;
-  /** The person's answer to the Guided proposal. */
-  readonly decide: (
-    threadId: ThreadId,
-    input: GameKeepGoingDecideInput,
-  ) => Fails<GameKeepGoingDecideResult>;
-  /** The person's words for the next step, from any chat of the game. */
+  /** The person's words added to keep going's direction, from any chat of the game. */
   readonly steer: (
     threadId: ThreadId,
     input: GameKeepGoingSteerInput,
@@ -325,25 +317,25 @@ const make = Effect.gen(function* () {
     input: GameKeepGoingInput,
   ) {
     const { projectId } = yield* resolveGame(threadId);
-    yield* gameLock.withLock(projectId, setOnce(threadId, input));
-    // The run is on now, so the note is its next step: a proposal already made gives way to it.
-    const note = input.note?.trim() ?? "";
-    if (input.mode !== "off" && note.length > 0)
+    // Already on here, the note is added to its direction.
+    const addTo = yield* gameLock.withLock(projectId, setOnce(threadId, input));
+    if (addTo)
       yield* steer(threadId, {
         threadId,
         ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
-        text: note,
+        text: input.note?.trim() ?? "",
       });
     return yield* status(threadId);
   });
 
+  /** Starts, resumes or stops the run; true when it is already on here and the note is for it. */
   const setOnce = (threadId: ThreadId, input: GameKeepGoingInput) =>
     Effect.gen(function* () {
       const { root, projectRun: run, shell } = yield* resolveGame(threadId);
       const live = run !== null && run.status !== "ended" ? run : null;
       if (input.mode === "off") {
         // Stopping is always allowed, from any chat of the game.
-        if (live === null) return;
+        if (live === null) return false;
         yield* dispatch("set", {
           type: "game-run.stop",
           commandId: yield* commandId("keep-going-off", input.commandId, threadId, live.id),
@@ -356,9 +348,10 @@ const make = Effect.gen(function* () {
           live.threadId,
           (step) => step.runId !== live.id,
         );
-        return;
+        return false;
       }
-      const profile = input.mode;
+      const note = input.note?.trim() ?? "";
+      const direction = note.length === 0 ? {} : { direction: note };
       if (live !== null) {
         if (live.threadId !== threadId)
           return yield* runError(
@@ -367,15 +360,7 @@ const make = Effect.gen(function* () {
             "run-live",
             (yield* blockedFor(threadId, root, live)) ?? "Keep going is on in another chat.",
           );
-        if (live.profile === profile) return;
-        yield* dispatch("set", {
-          type: "game-run.profile.set",
-          commandId: yield* commandId("keep-going-mode", input.commandId, threadId, live.id),
-          threadId,
-          runId: live.id,
-          profile,
-        });
-        return;
+        return note.length > 0;
       }
       if (shell.archivedAt !== null)
         return yield* runError(
@@ -422,10 +407,10 @@ const make = Effect.gen(function* () {
           commandId: yield* commandId("keep-going-on", input.commandId, threadId, run.id),
           threadId,
           runId: run.id,
-          profile,
           ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
+          ...direction,
         });
-        return;
+        return false;
       }
       yield* scaffold(threadId, root, engineId, true);
       yield* dispatch("set", {
@@ -437,9 +422,10 @@ const make = Effect.gen(function* () {
         ),
         engine: engineId,
         lane: manifest.project,
-        profile,
         budgetMinutes: input.budgetMinutes === undefined ? 60 : input.budgetMinutes,
+        ...direction,
       });
+      return false;
     });
 
   /** The game's keep-going run, which the person's answer or note is for. */
@@ -456,50 +442,6 @@ const make = Effect.gen(function* () {
           )
         : Effect.succeed(projectRun),
     );
-
-  const decide: Service["decide"] = Effect.fn("GameRunControl.decide")(function* (
-    threadId: ThreadId,
-    input: GameKeepGoingDecideInput,
-  ) {
-    const run = yield* turnsRun("decide", threadId);
-    const waiting =
-      input.answer === "skip" ? (yield* readRun("decide", threadId, run)).inFlight : null;
-    yield* dispatch("decide", {
-      type: "game-run.decide",
-      commandId: yield* commandId("keep-going-decide", input.commandId, threadId, run.id),
-      threadId: run.threadId,
-      runId: run.id,
-      decisionId: input.stepId,
-      answer: input.answer,
-      chat: threadId,
-    });
-    // The person turned the step down: every later session, and keep going after this run,
-    // hears it from the game's decisions.
-    const skipped =
-      waiting?.id === input.stepId && waiting.step.kind === "propose"
-        ? waiting.step.proposal
-        : null;
-    if (skipped !== null)
-      yield* Effect.flatMap(projects.resolve(threadId), (root) =>
-        recordDecision(root, {
-          kind: "skipped",
-          text: `Skipped keep going's step: ${headline(skipped)}`,
-          key: skipped.key,
-        }),
-      ).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("A skipped step could not be kept in the decisions.", { cause }),
-        ),
-      );
-    return {
-      message:
-        input.answer === "start"
-          ? "The step starts now."
-          : input.answer === "skip"
-            ? "Skipped: keep going sets that step aside and proposes the next one."
-            : "The proposal waits for you. A message you send goes first.",
-    };
-  });
 
   const steer: Service["steer"] = Effect.fn("GameRunControl.steer")(function* (
     threadId: ThreadId,
@@ -525,8 +467,8 @@ const make = Effect.gen(function* () {
       pending: now.steer.length,
       message:
         now.status === "ended"
-          ? "Keep going keeps your note for when it next runs."
-          : "Keep going takes your note as its next step.",
+          ? "Keep going keeps your words for when it next runs."
+          : "Keep going adds your words to its direction.",
     };
   });
 
@@ -630,7 +572,6 @@ const make = Effect.gen(function* () {
   return GameRunControl.of({
     set,
     status,
-    decide,
     steer,
     steps,
     stepModelChoice,

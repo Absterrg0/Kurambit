@@ -155,8 +155,20 @@ const make = Effect.gen(function* () {
         (each) => each.runId === run.id && each.seq === run.inFlight,
       );
       if (step === undefined || (step.status !== "planned" && step.status !== "running")) return;
-      // A proposal waits on its deadline effect, which the outbox kept.
-      if (step.step.kind === "propose") return;
+      // A proposal an earlier Kurambit's Guided mode left waiting starts now: nothing waits
+      // on a countdown any more, and a held one has no deadline to fire.
+      if (step.step.kind === "propose") {
+        yield* refusedOnly(
+          engine.dispatch({
+            type: "game-run.decision.expire",
+            commandId: CommandId.make(`server:game-run-recover-proposal:${step.id}`),
+            threadId,
+            runId: run.id,
+            decisionId: step.id,
+          }),
+        );
+        return;
+      }
       // An effect still owed drives the step; otherwise a durable wake does,
       // in the outbox's order, never a job started from here.
       if (

@@ -13,7 +13,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gameOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameKeepGoing]: AuthOrchestrationOperateScope,
-  [WS_METHODS.gameKeepGoingDecide]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameWebPackage]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameWebExportUrl]: AuthOrchestrationOperateScope,
   [WS_METHODS.gamePublishConnect]: AuthOrchestrationOperateScope,

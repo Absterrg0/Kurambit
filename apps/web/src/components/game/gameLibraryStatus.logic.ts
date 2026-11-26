@@ -3,8 +3,6 @@ export interface GameLibraryStatusInput {
   readonly chats: "approval" | "input" | "working" | "failed" | "other";
   /** Keep going's own line while a run is live here ("Keep going · step 3"). */
   readonly keepGoing: string | null;
-  /** Its next step is proposed to start at this time ("3:11 PM"): it waits, not works. */
-  readonly keepGoingStartsAt: string | null;
   /** An engine's own build (an export) is running. */
   readonly operationRunning: boolean;
   /** A turn has ended and its build is being saved (useTurnLanding). */
@@ -48,11 +46,7 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   });
   if (input.chats === "approval" || input.chats === "input")
     return line("Needs your answer", "live");
-  if (input.keepGoing !== null)
-    return input.keepGoingStartsAt === null
-      ? line(input.keepGoing, "live")
-      : // Short enough for a sidebar row: whose step it is, and the time the run waits for.
-        line(`Keep going at ${input.keepGoingStartsAt}`, "idle");
+  if (input.keepGoing !== null) return line(input.keepGoing, "live");
   // The top bar's own words; it holds the turn's clock, the library only says what is made.
   if (input.saving) return line(`Saving build ${input.nextBuild}`, "live");
   if (input.chats === "working") return line(`Making build ${input.nextBuild}`, "live");

@@ -16,7 +16,6 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 const RPC_AGGREGATES = {
   [WS_METHODS.gameKeepGoing]: "game",
   [WS_METHODS.gameKeepGoingStatus]: "game",
-  [WS_METHODS.gameKeepGoingDecide]: "game",
   [WS_METHODS.gameMediaSave]: "game",
   [WS_METHODS.gameSavedList]: "game",
   [WS_METHODS.gameSavedDelete]: "game",

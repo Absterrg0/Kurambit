@@ -1,5 +1,6 @@
 // The keep-going policy's tricky rules: what counts as worse, what counts as
-// gain, never repeating a failed step, and the person's captured notes.
+// gain, never repeating a failed step, the order of evidence, and the person's
+// direction.
 import { describe, expect, it } from "@effect/vitest";
 import {
   type GameBuildFacts,
@@ -60,10 +61,10 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
 const deadControls = (dead: number) => facts({ qa: { status: "measured", value: qaReport(dead) } });
 
 const state = (patch: Partial<RunState> = {}): RunState => ({
-  profile: "autopilot",
   budgetMinutes: null,
-  budgetEndsAt: null,
+  budgetUsedMs: 0,
   steer: [],
+  finish: null,
   setAside: [],
   stallStreak: 0,
   superseded: 0,
@@ -88,7 +89,6 @@ const turnStep = (patch: Partial<GameRunTurnStep> = {}): GameRunTurnStep => ({
   steer: [],
   base: BASE,
   capMs: 15 * 60_000,
-  startedBy: "autopilot",
   ...patch,
 });
 // `startBuild` is the folder's build when the turn started (T's report).
@@ -245,7 +245,7 @@ describe("never repeat", () => {
     });
   });
 
-  it("sets aside a fact step the agent declined and a skipped step", () => {
+  it("sets aside a fact step the agent declined", () => {
     const fact = turnStep({
       proposal: proposal({
         why: "fact",
@@ -260,11 +260,18 @@ describe("never repeat", () => {
     });
     expect(declined.state.setAside.map((s) => s.key)).toEqual(["fact:controls"]);
     expect(Loop.propose(declined.state, look({ facts: deadControls(1), next: "none" }))).toBeNull();
+  });
 
-    const skipped = Loop.applyDecided(state(), proposal(), BASE, "skip", "creator", NOW);
-    expect(skipped.state.setAside).toEqual([
-      { key: "next:1", text: "Add a second enemy type.", why: "you skipped it" },
-    ]);
+  it("finishes a step the time cap cut off before it changed anything, never sets it aside", () => {
+    const capped = Loop.applyTurn(
+      state(),
+      turnStep(),
+      turnResult({ outcome: "capped", files: 0, build: null }),
+      { now: NOW, since: NOW, started: true },
+    );
+    expect(capped.state.setAside).toEqual([]);
+    expect(Loop.propose(capped.state, look())).toMatchObject({ key: "next:1" });
+    expect(Loop.propose(capped.state, look())?.text).toMatch(/^Finish step 1: /);
   });
 });
 
@@ -280,7 +287,7 @@ describe("the proposal", () => {
     expect(Loop.propose(state(), look({ next: null }))?.text).toBe(
       "Make the one change that most improves the game for BRIEF.md.",
     );
-    expect(Loop.applyLook(state(), look({ next: "none" }), NOW).state.ending).toBe("done");
+    expect(Loop.applyLook(state(), look({ next: "none" })).state.ending).toBe("done");
   });
 
   // Matching the person's picture is their stated goal: while the agent's final check still
@@ -291,24 +298,34 @@ describe("the proposal", () => {
     expect(step).toMatchObject({ why: "reference" });
     expect(step?.text).toContain("The camera sits higher and closer than the picture's.");
     expect(Loop.propose(state(), look({ facts: deadControls(1), critique: "none" }))?.why).toBe(
-      "fact",
+      "next",
     );
     const crashing = facts({ masher: tier("crashed", 12) });
     expect(Loop.propose(state(), look({ facts: crashing, critique }))?.why).toBe("blocker");
   });
 
-  // With nothing measured to fix, what a player would notice first comes before the agent's own
-  // plan; a failing fact and the person's picture still come first, and "none" falls through.
-  it("takes the biggest problem fresh eyes saw before the agent's own next line", () => {
+  // Taste from screenshots never outranks a plan: fresh eyes is proposed only when the agent's
+  // own `Next:` is none or missing, and the person's picture still comes first.
+  it("takes the biggest problem fresh eyes saw only when no Next is left", () => {
     const fresh = { text: "The player's ship is a small pale blob against the wall glow" };
-    const step = Loop.propose(state(), look({ fresh }));
+    expect(Loop.propose(state(), look({ fresh }))?.why).toBe("next");
+    const step = Loop.propose(state(), look({ fresh, next: "none" }));
     expect(step).toMatchObject({ why: "fresh" });
     expect(step?.text).toContain("The player's ship is a small pale blob against the wall glow.");
-    expect(Loop.propose(state(), look({ fresh: "none" }))?.why).toBe("next");
-    expect(Loop.propose(state(), look({ fresh: null }))?.why).toBe("next");
-    expect(Loop.propose(state(), look({ facts: deadControls(1), fresh }))?.why).toBe("fact");
+    expect(Loop.propose(state(), look({ fresh, next: null }))?.why).toBe("fresh");
+    expect(Loop.propose(state(), look({ fresh: "none", next: null }))?.text).toBe(
+      "Make the one change that most improves the game for BRIEF.md.",
+    );
     const critique = { text: "The camera sits higher than the picture's" };
     expect(Loop.propose(state(), look({ critique, fresh }))?.why).toBe("reference");
+  });
+
+  // The controls fact sees only whether a declared action was read in one scripted run: a step
+  // "fixing" it rebound the person's jump to Enter and J.
+  it("never proposes the controls fact; boots and errors still do", () => {
+    expect(Loop.propose(state(), look({ facts: deadControls(2), next: "none" }))).toBeNull();
+    const crashing = facts({ masher: tier("crashed", 12) });
+    expect(Loop.propose(state(), look({ facts: crashing }))?.why).toBe("blocker");
   });
 
   // The judge waits only for the boot check, so the random-input play of a step's build may
@@ -329,55 +346,111 @@ describe("the proposal", () => {
   });
 
   it("keeps starting turns while the budget has time, each capped at the time left", () => {
-    const ends = (minutes: number) => state({ budgetEndsAt: NOW + minutes * 60_000 });
-    expect(Loop.applyLook(ends(0.5), look(), NOW).state.ending).toBe("budget");
-    expect(Loop.applyLook(ends(4), look(), NOW).plan).toMatchObject({
-      kind: "turn",
-      capMs: 4 * 60_000,
-    });
-    expect(Loop.applyLook(ends(10), look(), NOW).plan).toMatchObject({
+    const left = (minutes: number) =>
+      state({ budgetMinutes: 60, budgetUsedMs: (60 - minutes) * 60_000 });
+    expect(Loop.applyLook(left(0.5), look()).state.ending).toBe("budget");
+    expect(Loop.applyLook(left(4), look()).plan).toMatchObject({ kind: "turn", capMs: 4 * 60_000 });
+    expect(Loop.applyLook(left(10), look()).plan).toMatchObject({
       kind: "turn",
       capMs: 10 * 60_000,
     });
-    expect(Loop.applyLook(ends(60), look(), NOW).plan).toMatchObject({ capMs: 15 * 60_000 });
-    expect(Loop.applyLook(state({ profile: "guided" }), look(), NOW).plan).toMatchObject({
-      kind: "propose",
-      deadline: NOW + 60_000,
-    });
+    expect(Loop.applyLook(left(60), look()).plan).toMatchObject({ capMs: 15 * 60_000 });
+  });
+
+  it("spends the budget on a turn's working time only", () => {
+    const spent = Loop.applyTurn(
+      state({ budgetMinutes: 60 }),
+      turnStep(),
+      turnResult({ elapsedMs: 7 * 60_000 }),
+      { now: NOW + 3_600_000, since: NOW, started: true },
+    );
+    expect(spent.state.budgetUsedMs).toBe(7 * 60_000);
+    expect(Loop.budgetLeft(spent.state)).toBe(53 * 60_000);
   });
 });
 
-describe("the captured prefix", () => {
-  it("holds the notes until the turn starts, and gives them back when it never landed", () => {
-    const s = state({ steer: ["a", "b"] });
-    const turn = Loop.applyLook(s, look(), NOW).plan;
-    expect(turn).toMatchObject({ kind: "turn", steer: ["a", "b"], startedBy: "autopilot" });
-    // Started (taken off the run's steer), then superseded: given back ahead of a newer note.
-    const step = turnStep({ steer: ["a", "b"], proposal: proposal({ why: "steer" }) });
+describe("the person's direction", () => {
+  const started = { now: NOW, since: NOW, started: true };
+  const asked = (steer: ReadonlyArray<string>) =>
+    turnStep({ steer, proposal: proposal({ why: "steer", key: "steer:1" }) });
+
+  it("is carried whole by every step, and outranks every fact", () => {
+    const long = `Bolts and outlines. ${"x".repeat(400)} Then build the Blender Hive Queen.`;
+    const s = state({ steer: [long] });
+    expect(Loop.applyLook(s, look()).plan).toMatchObject({ kind: "turn", steer: [long] });
+    const crashing = facts({ masher: tier("crashed", 12) });
+    const step = Loop.propose(s, look({ facts: crashing }));
+    expect(step?.why).toBe("steer");
+    expect(step?.text).toContain(long);
+    expect(step?.text).toContain("`Direction: done`");
+  });
+
+  it("goes on from the step before it: what the time cap cut, or that step's Next line", () => {
+    const kept = Loop.applyJudge(
+      state({ steer: ["Bolts, then the queen."] }),
+      cycle(asked(["Bolts, then the queen."]), turnResult({ outcome: "capped" })),
+      { kind: "judge", base: facts(), build: { ...facts(), build: BUILD } },
+      NOW,
+    );
+    expect(kept.state.finish).toMatchObject({ n: 1, proposal: { why: "steer" } });
+    const finishing = Loop.propose(kept.state, look());
+    expect(finishing?.text).toContain("Step 1 worked on it and Kurambit's time cap stopped it");
+    // A non-direction finish never jumps the direction.
+    expect(finishing?.why).toBe("steer");
+
+    const completed = Loop.applyJudge(
+      state({ steer: ["Bolts, then the queen."] }),
+      cycle(asked(["Bolts, then the queen."])),
+      { kind: "judge", base: facts(), build: { ...facts(), build: BUILD } },
+      NOW,
+    );
+    expect(
+      Loop.propose(completed.state, look({ next: { text: "Build the Blender queen." } }))?.text,
+    ).toContain("Step 1 worked on it and said what is left: Build the Blender queen.");
+  });
+
+  it("stays whatever became of the turn; one an earlier Kurambit took at its start comes back", () => {
     const back = Loop.applyTurn(
       state({ steer: ["c"] }),
-      step,
+      asked(["a", "b"]),
       turnResult({ outcome: "superseded" }),
-      {
-        now: NOW,
-        since: NOW,
-        started: true,
-      },
+      started,
     );
     expect(back.state.steer).toEqual(["a", "b", "c"]);
     expect(back.plan).toEqual({ kind: "look" });
-    // Superseded before it started: the notes never left the run's steer.
     const kept = Loop.applyTurn(
       state({ steer: ["a", "b", "c"] }),
-      step,
+      asked(["a", "b"]),
       turnResult({ outcome: "superseded" }),
-      {
-        now: NOW,
-        since: NOW,
-        started: false,
-      },
+      { ...started, started: false },
     );
     expect(kept.state.steer).toEqual(["a", "b", "c"]);
+  });
+
+  it("is retired only by a kept direction step whose reply says it is done", () => {
+    const judge = (s: RunState, c: Loop.Cycle) =>
+      Loop.applyJudge(
+        s,
+        c,
+        { kind: "judge", base: facts(), build: { ...facts(), build: BUILD } },
+        NOW,
+      );
+    const done = turnResult({ done: true });
+    expect(judge(state({ steer: ["a", "b"] }), cycle(asked(["a"]), done)).state.steer).toEqual([
+      "b",
+    ]);
+    // Said by a step that was not about the direction, it retires nothing.
+    expect(
+      judge(state({ steer: ["a"] }), cycle(turnStep({ steer: ["a"] }), done)).state.steer,
+    ).toEqual(["a"]);
+    expect(judge(state({ steer: ["a"] }), cycle(asked(["a"]))).state.steer).toEqual(["a"]);
+  });
+
+  it("is told apart from a reply's prose", () => {
+    expect(Loop.directionDone("Added the queen.\n\nDirection: done\nNext: none")).toBe(true);
+    expect(Loop.directionDone("- **Direction: done**")).toBe(true);
+    expect(Loop.directionDone("The direction: done soon, I hope.")).toBe(false);
+    expect(Loop.replyHeadline("Direction: done\nAdded the queen.")).toBe("Added the queen.");
   });
 });
 

@@ -58,7 +58,6 @@ import {
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import { GameEngineId } from "./game.ts";
-import { GameRunProfile } from "./gameRun.ts";
 import {
   GameRun,
   GameRunId,
@@ -3118,16 +3117,22 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     engine: GameEngineId,
     /** The engine project directory the game's manifest names. */
     lane: TrimmedNonEmptyString,
-    profile: GameRunProfile,
     /** Null is no limit. */
     budgetMinutes: Schema.NullOr(PositiveInt),
+    /** The person's words: the run's direction. Absent carries the direction left from before. */
+    direction: Schema.optionalKey(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000)),
+    ),
   }),
   /** Continues a run that ended resumably; any other ending is refused `not-resumable`. */
   Schema.Struct({
     type: Schema.Literal("game-run.resume"),
     ...GameRunCommandFields,
-    profile: Schema.optionalKey(GameRunProfile),
     budgetMinutes: Schema.optionalKey(Schema.NullOr(PositiveInt)),
+    /** The person's words: they replace the run's direction. Absent keeps it. */
+    direction: Schema.optionalKey(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000)),
+    ),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.stop"),
@@ -3136,26 +3141,11 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     /** The server's own stop for a tool that kept failing: the run pauses as tool-failed with `reason`, not "stopped". */
     ending: Schema.optionalKey(Schema.Literal("tool-failed")),
   }),
-  /** The person's note for the next step. */
+  /** The person's words added to a run's direction. */
   Schema.Struct({
     type: Schema.Literal("game-run.steer"),
     ...GameRunCommandFields,
     note: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4000)),
-    /** The chat the command came from. Absent on commands from older servers. */
-    chat: Schema.optionalKey(ThreadId),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("game-run.profile.set"),
-    ...GameRunCommandFields,
-    profile: GameRunProfile,
-  }),
-  /** The person's answer to a Guided proposal. */
-  Schema.Struct({
-    type: Schema.Literal("game-run.decide"),
-    ...GameRunCommandFields,
-    /** The propose step's id. */
-    decisionId: TrimmedNonEmptyString,
-    answer: Schema.Literals(["start", "skip", "hold"]),
     /** The chat the command came from. Absent on commands from older servers. */
     chat: Schema.optionalKey(ThreadId),
   }),
@@ -3191,9 +3181,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     reason: Schema.String,
   }),
   /**
-   * The proposal's deadline effect fired; the run takes the default if it is
-   * still due. Its command id derives from that effect's id, so each deadline
-   * gets its own receipt and one that fired early never refuses a later one.
+   * A proposal an earlier Kurambit's Guided mode left waiting starts: its deadline effect fired,
+   * or recovery found it. Its command id derives from that effect's id (or the recovery's).
    */
   Schema.Struct({
     type: Schema.Literal("game-run.decision.expire"),

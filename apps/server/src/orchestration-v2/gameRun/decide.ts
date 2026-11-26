@@ -1,7 +1,7 @@
 // PURE. Keep going, whole: for each game-run command, the thread's game-run
 // records in, the events, outbox effects or a typed refusal out. The one
-// place that decides the next step (look, then (Guided) propose, then turn,
-// judge, maybe undo, then the step's record, then look again), when to keep,
+// place that decides the next step (look, then turn, judge, maybe undo, then
+// the step's record, then look again), when to keep,
 // undo, pause or stop, and why. Every input arrives as a step result a job
 // measured; nothing here does I/O or calls a model, so a proposal costs no
 // tokens. Every loop back to a look is bounded by a streak that only a landed
@@ -16,7 +16,6 @@ import {
   type GameRun,
   type GameRunEnding,
   type GameRunId,
-  type GameRunProfile,
   type GameRunProposal,
   type GameRunRefusalReason,
   type GameRunRound,
@@ -48,11 +47,13 @@ export type StepRecord = GameRunRoundRecord & {
 type SetAside = NonNullable<GameRun["setAside"]>[number];
 
 export interface RunState {
-  readonly profile: GameRunProfile;
   readonly budgetMinutes: number | null;
-  /** Epoch ms; null without a budget. */
-  readonly budgetEndsAt: number | null;
+  /** The working time of the steps' turns so far: only it spends the budget. */
+  readonly budgetUsedMs: number;
+  /** The person's direction, kept until a step that carried it says it is done. */
   readonly steer: ReadonlyArray<string>;
+  /** A step the time cap stopped, which the next step finishes once. */
+  readonly finish: NonNullable<GameRun["finish"]> | null;
   readonly setAside: ReadonlyArray<SetAside>;
   /** Steps in a row that kept nothing (undone, or no game file changed). */
   readonly stallStreak: number;
@@ -97,10 +98,10 @@ const toState = (
   rounds: ReadonlyArray<GameRunRound>,
   gameLastStep: number,
 ): RunState => ({
-  profile: run.profile,
   budgetMinutes: run.budgetMinutes,
-  budgetEndsAt: run.budgetEndsAt,
+  budgetUsedMs: run.budgetUsedMs ?? 0,
   steer: run.steer,
+  finish: run.finish ?? null,
   setAside: run.setAside ?? [],
   stallStreak: run.stallStreak,
   superseded: run.supersededStreak ?? 0,
@@ -114,12 +115,12 @@ const toState = (
   n: stepNumber(rounds, gameLastStep),
 });
 
-const withState = (run: GameRun, state: RunState): GameRun => ({
+const withState = ({ finish: _finish, ...run }: GameRun, state: RunState): GameRun => ({
   ...run,
-  profile: state.profile,
   budgetMinutes: state.budgetMinutes,
-  budgetEndsAt: state.budgetEndsAt,
+  budgetUsedMs: state.budgetUsedMs,
   steer: [...state.steer],
+  ...(state.finish === null ? {} : { finish: state.finish }),
   setAside: [...state.setAside],
   stallStreak: state.stallStreak,
   supersededStreak: state.superseded,
@@ -140,9 +141,8 @@ const MIN = 60_000;
  * the run (a 6-minute "typical step" stopped runs with 5 minutes left).
  */
 const STEP_LEAST_MS = 1 * MIN;
+/** A step turn's cap on the agent's own time (GameRunStepRunner counts it). */
 const CAP_CEILING_MS = 15 * MIN;
-/** Guided starts its proposal after this unless the person answers. */
-const PROPOSAL_WAIT_MS = 60_000;
 /** Steps in a row with no gain before the run pauses: it stopped improving the game. */
 const STALL_LIMIT = 2;
 /**
@@ -172,7 +172,7 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
 
 // ── The step's text: four templates, the facts' own wording and the agent's own line.
 const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
-  steer: "your note",
+  steer: "your direction",
   blocker: "blocker",
   regression: "after an undo",
   // Only an earlier Kurambit's records: the bot is now setup, never a step.
@@ -183,6 +183,11 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   next: "your agent's next step",
 };
 const STEER_INTRO = "The person asked for this, in their words:";
+/** The line a step's reply ends with once the person's direction it carried is all done. */
+const DIRECTION_DONE = "Direction: done";
+const DIRECTION_TAIL = `Take the next part of it that is not done yet. Once everything they asked for is done, put the line \`${DIRECTION_DONE}\` before your \`Next:\` line; until then keep going takes this direction again next step.`;
+/** How a step that finishes one the time cap stopped begins; such a step is never finished again. */
+const FINISH_LEAD = "Finish step";
 // Keep going measures every step's build itself and undoes one that breaks the game, so the
 // step spends its time on the change, not on a full check of its own.
 const STEP_TAIL =
@@ -256,13 +261,19 @@ export interface StepBriefing {
   readonly brief: string | null;
   readonly lastReply: string | null;
   readonly facts: GameBuildFacts | null;
+  /** The person's direction still to do, in full: a step on anything else keeps it in view. */
+  readonly direction: ReadonlyArray<string>;
 }
 
 const BRIEF_MAX = 2500;
 const REPLY_MAX = 2000;
 const PAST_STEPS = 5;
 
-const briefingText = (rounds: ReadonlyArray<GameRunRound>, briefing: StepBriefing): string => {
+const briefingText = (
+  rounds: ReadonlyArray<GameRunRound>,
+  briefing: StepBriefing,
+  why: GameRunStepWhy,
+): string => {
   const facts =
     briefing.facts === null
       ? []
@@ -283,6 +294,11 @@ const briefingText = (rounds: ReadonlyArray<GameRunRound>, briefing: StepBriefin
   return [
     "This step runs in a session of its own, without the chat's history. What you need about the game is below; read its files only as far as this change needs.",
     ...section("BRIEF.md:", briefing.brief === null ? null : clip(briefing.brief, BRIEF_MAX)),
+    // A direction step's own text already carries it.
+    ...section(
+      "The person's direction for keep going, not done yet (this step is not about it, but do nothing against it):",
+      why === "steer" || briefing.direction.length === 0 ? null : briefing.direction.join("\n\n"),
+    ),
     ...section(
       "The chat's last reply:",
       briefing.lastReply === null ? null : clip(briefing.lastReply, REPLY_MAX),
@@ -320,7 +336,8 @@ export const stepMessage = (
     capMs === undefined || capMs >= CAP_CEILING_MS
       ? ""
       : `Keep going's budget leaves this turn ${Math.max(1, Math.floor(capMs / MIN))} minute(s): make a change that fits.\n\n`;
-  const about = briefing === undefined ? "" : `\n\n---\n\n${briefingText(rounds, briefing)}`;
+  const about =
+    briefing === undefined ? "" : `\n\n---\n\n${briefingText(rounds, briefing, proposal.why)}`;
   return {
     text: `Keep going · step ${n} (${WHY_LABEL[proposal.why]})\n\n${cap}${short}${proposal.text}\n\n${STEP_TAIL}${about}`,
     summary: `Keep going · step ${n}: ${proposalSummary(proposal)}`,
@@ -339,10 +356,18 @@ export const replyHeadline = (reply: string, max = 140): string => {
     reply
       .split("\n")
       .map((each) => each.trim().replace(MARKDOWN_LEAD, "").replace(/[*_`]/g, "").trim())
-      .find((each) => each.length > 0 && !/^next\s*:/i.test(each)) ?? "";
+      .find((each) => each.length > 0 && !/^(?:next|direction)\s*:/i.test(each)) ?? "";
   const sentence = /^(.+?[.!?])(?:\s|$)/.exec(line)?.[1] ?? line;
   return clip(sentence, max);
 };
+
+/** PURE. The reply says the person's direction it carried is all done: a `Direction: done` line. */
+export const directionDone = (reply: string): boolean =>
+  reply
+    .split("\n")
+    .some((line) =>
+      /^direction\s*:\s*done\b/i.test(line.trim().replace(MARKDOWN_LEAD, "").replace(/[*_`]/g, "")),
+    );
 
 /** FNV-1a: a short stable key for a text, never a secret. */
 const fnv = (text: string) => {
@@ -466,15 +491,41 @@ const factStep = (
   };
 };
 
-/** The person's waiting notes as one step, verbatim; null when none wait. */
-const steerProposal = (state: RunState): GameRunProposal | null => {
+/**
+ * The person's direction as the next step, verbatim and whole, with what the step before it left
+ * of it: the part the time cap cut off, or that step's own `Next:` line. Null without one.
+ */
+const directionProposal = (state: RunState, look: LookResult): GameRunProposal | null => {
   if (state.steer.length === 0) return null;
   const entries = state.steer.join("\n\n");
+  const last = state.records.at(-1);
+  const next = look.next !== null && look.next !== "none" ? look.next.text.trim() : "";
+  const left =
+    state.finish?.proposal.why === "steer"
+      ? `Step ${state.finish.n} worked on it and Kurambit's time cap stopped it before it was done: finish what it started first.`
+      : last?.step.why === "steer" && next !== ""
+        ? `Step ${last.round} worked on it and said what is left: ${clip(next, 1000)}`
+        : "";
+  const tail = `${left === "" ? "" : `${left}\n\n`}${DIRECTION_TAIL}`;
   return {
     why: "steer",
-    text: clip(`${STEER_INTRO}\n\n${entries}`, TEXT_MAX),
+    text: `${STEER_INTRO}\n\n${clip(entries, TEXT_MAX - tail.length - STEER_INTRO.length - 4)}\n\n${tail}`,
     target: null,
     key: `steer:${fnv(entries)}`,
+  };
+};
+
+/** The step the time cap stopped, to finish; a direction step's is the direction's own. */
+const finishProposal = (state: RunState): GameRunProposal | null => {
+  const finish = state.finish;
+  if (finish === null || finish.proposal.why === "steer") return null;
+  // Its first line is its headline, which names the step's build.
+  return {
+    ...finish.proposal,
+    text: clip(
+      `${FINISH_LEAD} ${finish.n}: ${headline(finish.proposal)}\n\nKurambit's time cap stopped step ${finish.n} before it was done. Finish what it started. It was asked:\n\n${finish.proposal.text}`,
+      TEXT_MAX,
+    ),
   };
 };
 
@@ -520,13 +571,13 @@ const freshProposal = (look: LookResult): GameRunProposal | null => {
 };
 
 /**
- * The order of evidence, the person's first: their notes, a blocker, a retry
- * of an undone step, the picture they asked to match while it still differs,
- * a failing fact, the biggest problem fresh eyes saw, then the agent's own
- * next line. Every
- * candidate whose key is set aside is passed over. Null: nothing left to
- * propose. The play bot is no candidate: a step must change what a person
- * sees or fix a measured fault.
+ * The order of evidence, the person's first: their direction (with what the
+ * step before left of it), a step the time cap cut off, a blocker, a retry of
+ * an undone step, the picture they asked to match while it still differs, a
+ * failing fact a player would hit, the agent's own next line, and only when
+ * none is left the biggest problem fresh eyes saw. Every candidate whose key
+ * is set aside is passed over. Null: nothing left to propose. The play bot is
+ * no candidate: a step must change what a person sees or fix a measured fault.
  */
 export const propose = (state: RunState, look: LookResult): GameRunProposal | null => {
   // The run's own set-aside steps, and what the person turned down in any run or chat.
@@ -535,7 +586,8 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
   const views = facts === null ? null : viewsOf(facts);
   const earlier = look.earlier === undefined ? null : viewsOf(look.earlier);
   const candidates: Array<() => GameRunProposal | null> = [
-    () => steerProposal(state),
+    () => directionProposal(state, look),
+    () => finishProposal(state),
     ...(facts === null || views === null
       ? []
       : blockers(views).map((id) => () => factStep("blocker", id, views))),
@@ -567,17 +619,25 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
       ? []
       : // A saved play that ends otherwise is proposed, never undone: it may be the change
         // the person asked for, and the step's agent says whether it was. So are the other
-        // screen sizes: a game made for one shape of window may be meant that way.
-        (["controls", "retry", "hud", "screens", "saved-plays"] as const)
+        // screen sizes: a game made for one shape of window may be meant that way. The
+        // controls fact proposes nothing: it sees only whether a declared action was read in
+        // one scripted run, and steps "fixing" it rebound the person's controls to quiet it.
+        (["retry", "hud", "screens", "saved-plays"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
-    () => freshProposal(look),
     () => {
-      if (look.next === "none") return null;
-      const text = look.next === null ? "" : look.next.text.trim();
-      const line = text.length === 0 ? NEXT_FALLBACK : clip(text, TEXT_MAX);
+      const text = look.next === null || look.next === "none" ? "" : look.next.text.trim();
+      if (text.length === 0) return null;
+      const line = clip(text, TEXT_MAX);
       return { why: "next", text: line, target: null, key: nextKey(line) };
     },
+    // Taste from screenshots: never ahead of the person's or the agent's own plan.
+    () => freshProposal(look),
+    // No `Next:` line at all: the agent's plan is to improve the game.
+    () =>
+      look.next === null
+        ? { why: "next", text: NEXT_FALLBACK, target: null, key: nextKey(NEXT_FALLBACK) }
+        : null,
   ];
   for (const candidate of candidates) {
     const proposal = candidate();
@@ -587,22 +647,29 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
 };
 
 // ── Budget. ─────────────────────────────────────────────────────────────────
-const remaining = (state: RunState, now: number) =>
-  state.budgetEndsAt === null ? Number.POSITIVE_INFINITY : state.budgetEndsAt - now;
-const fitsBudget = (state: RunState, now: number): boolean =>
-  remaining(state, now) >= STEP_LEAST_MS;
+// Only the steps' turns spend it: a wait for a measure, the time between steps and the time the
+// app was off do not (a run's hour once ran out while the computer was off).
+/** The budget left, in ms. */
+export const budgetLeft = (state: Pick<RunState, "budgetMinutes" | "budgetUsedMs">): number =>
+  state.budgetMinutes === null
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, state.budgetMinutes * MIN - state.budgetUsedMs);
+const fitsBudget = (state: RunState): boolean => budgetLeft(state) >= STEP_LEAST_MS;
 /** The turn's cap: the time left, at most 15 minutes. */
-const turnCap = (state: RunState, now: number): number =>
-  Math.min(CAP_CEILING_MS, remaining(state, now));
+const turnCap = (state: RunState): number => Math.min(CAP_CEILING_MS, budgetLeft(state));
 
-/** A turn that never landed gives back the notes its start took. */
-const giveBackSteer = (state: RunState, turn: GameRunTurnStep, started: boolean): RunState =>
-  started && turn.steer.length > 0 ? { ...state, steer: [...turn.steer, ...state.steer] } : state;
+/**
+ * The direction a turn carried stays the run's whatever became of the turn. A step planned by an
+ * earlier Kurambit took its notes off the run as it started; they come back here.
+ */
+const keepDirection = (state: RunState, turn: GameRunTurnStep): RunState => {
+  const back = turn.steer.filter((entry) => !state.steer.includes(entry));
+  return back.length === 0 ? state : { ...state, steer: [...back, ...state.steer] };
+};
 
 // ── What a result leads to. ─────────────────────────────────────────────────
 export type Plan =
   | { readonly kind: "look" }
-  | { readonly kind: "propose"; readonly proposal: GameRunProposal; readonly deadline: number }
   | Omit<GameRunTurnStep, "id">
   | { readonly kind: "judge"; readonly build: GameBuildId; readonly base: GameBuildId | null }
   | { readonly kind: "undo"; readonly target: GameBuildId; readonly expect: GameBuildId };
@@ -654,36 +721,26 @@ const lookAgain = (state: RunState, why: string, log: string): Next => {
     : go(next, LOOK, log);
 };
 
-/** The turn of a proposal, if the budget still holds one. */
-const startTurn = (
-  state: RunState,
-  proposal: GameRunProposal,
-  base: GameBuildId | null,
-  startedBy: GameRunTurnStep["startedBy"],
-  now: number,
-): Next => {
-  if (!fitsBudget(state, now)) return end(state, "budget", "", "the budget holds no other step");
+/**
+ * The turn of a proposal, if the budget still holds one. It carries the person's direction, so
+ * its briefing keeps it in view and a reply that finishes it can retire it. Starting a step
+ * spends the finish the time cap left: a step is finished once.
+ */
+const startTurn = (state: RunState, proposal: GameRunProposal, base: GameBuildId | null): Next => {
+  if (!fitsBudget(state)) return end(state, "budget", "", "the budget holds no other step");
   return go(
-    state,
-    {
-      kind: "turn",
-      proposal,
-      steer: proposal.why === "steer" ? [...state.steer] : [],
-      base,
-      capMs: turnCap(state, now),
-      startedBy,
-    },
+    { ...state, finish: null },
+    { kind: "turn", proposal, steer: [...state.steer], base, capMs: turnCap(state) },
     `step ${state.n} (${proposal.why}) starts: ${headline(proposal)}`,
   );
 };
 
 /**
- * The look's evidence becomes a proposal: Autopilot starts it at once; Guided
- * shows it with a deadline, except the person's own note, which they already
- * asked for. A folder edited outside any build pauses the run: a step's undo
- * restores a build and would take those edits.
+ * The look's evidence becomes the next step, started at once: nothing waits on a countdown. A
+ * folder edited outside any build pauses the run: a step's undo restores a build and would take
+ * those edits.
  */
-export const applyLook = (state: RunState, look: LookResult, now: number): Next => {
+export const applyLook = (state: RunState, look: LookResult): Next => {
   if (look.edited)
     return end(
       state,
@@ -691,7 +748,7 @@ export const applyLook = (state: RunState, look: LookResult, now: number): Next 
       "the game folder has changes no build holds, and an undo would take them; send them in a turn first",
       "the folder holds no build",
     );
-  if (!fitsBudget(state, now)) return end(state, "budget", "", "the budget holds no other step");
+  if (!fitsBudget(state)) return end(state, "budget", "", "the budget holds no other step");
   const proposal = propose(state, look);
   if (proposal === null)
     return look.next === "none"
@@ -702,14 +759,7 @@ export const applyLook = (state: RunState, look: LookResult, now: number): Next 
           "every step left to propose was set aside",
           "every step left to propose was set aside",
         );
-  if (state.profile === "autopilot")
-    return startTurn(state, proposal, look.current, "autopilot", now);
-  if (proposal.why === "steer") return startTurn(state, proposal, look.current, "creator", now);
-  return go(
-    state,
-    { kind: "propose", proposal, deadline: now + PROPOSAL_WAIT_MS },
-    `step ${state.n} proposed (${proposal.why}): ${headline(proposal)}`,
-  );
+  return startTurn(state, proposal, look.current);
 };
 
 const setAside = (state: RunState, entry: SetAside): RunState =>
@@ -717,23 +767,14 @@ const setAside = (state: RunState, entry: SetAside): RunState =>
     ? state
     : { ...state, setAside: [...state.setAside, entry] };
 
-/** The person's or the default's answer to a Guided proposal, or a turn that superseded it. */
+/** A proposal an earlier Kurambit's Guided mode left waiting: it starts, or a turn went first. */
 export const applyDecided = (
   state: RunState,
   proposal: GameRunProposal,
   base: GameBuildId | null,
-  answer: "start" | "skip" | "superseded",
-  by: "creator" | "default" | "server",
-  now: number,
+  answer: "start" | "superseded",
 ): Next => {
-  if (answer === "start")
-    return startTurn(state, proposal, base, by === "creator" ? "creator" : "default", now);
-  if (answer === "skip")
-    return go(
-      setAside(state, { key: proposal.key, text: headline(proposal), why: "you skipped it" }),
-      LOOK,
-      `step ${state.n} skipped: set aside`,
-    );
+  if (answer === "start") return startTurn(state, proposal, base);
   return lookAgain(
     state,
     "another turn or a restore went first",
@@ -812,18 +853,28 @@ const misses = (records: ReadonlyArray<StepRecord>, key: string) =>
   records.filter((r) => r.step.key === key && r.failure === "game").length;
 
 /**
- * A step's record lands: never-repeat, the stall and harness streaks, then the
- * next look, or the ending they call for. A landed step ends a streak of
- * steps that never landed.
+ * A step's record lands: never-repeat, the stall and harness streaks, the
+ * person's direction and the finish the time cap leaves, then the next look,
+ * or the ending they call for. A landed step ends a streak of steps that never
+ * landed. A direction step whose reply says it is done retires the direction it
+ * carried, unless it was undone; words the person added since stay.
  */
-const settle = (state: RunState, record: StepRecord, log: string): Next => {
+const settle = (state: RunState, record: StepRecord, cycle: Cycle, log: string): Next => {
   const records = [...state.records, record];
+  const { turn, result } = cycle;
+  const kept = record.step.verdict !== "undone";
+  const done = kept && turn.proposal.why === "steer" && result.done === true;
   let next: RunState = {
     ...state,
     records,
     n: state.n + 1,
     stallStreak: record.step.gain ? 0 : state.stallStreak + 1,
     superseded: 0,
+    steer: done ? state.steer.filter((entry) => !turn.steer.includes(entry)) : state.steer,
+    finish:
+      record.step.capped !== undefined && kept && !turn.proposal.text.startsWith(FINISH_LEAD)
+        ? { n: record.round, proposal: turn.proposal }
+        : state.finish,
   };
   if (record.failure === "game" && misses(records, record.step.key) >= MISS_LIMIT)
     next = setAside(next, {
@@ -859,7 +910,11 @@ export const applyTurn = (
 ): Next => {
   const n = state.n;
   const cycle: Cycle = { turn, result, since: input.since };
-  const back = giveBackSteer(state, turn, input.started);
+  // Whatever became of the turn, its working time is spent and the direction it carried stays.
+  const back = keepDirection(
+    { ...state, budgetUsedMs: state.budgetUsedMs + Math.max(0, result.elapsedMs) },
+    turn,
+  );
   switch (result.outcome) {
     case "superseded":
       return lookAgain(
@@ -901,33 +956,33 @@ export const applyTurn = (
   const startBuild = result.startBuild;
   if (startBuild === null || startBuild !== turn.base) {
     const log = `step ${n} started on a build its look did not read: looking again`;
-    if (startBuild !== null) return lookAgain(state, "the game changed as its turn started", log);
-    const unknown = { ...state, stallStreak: state.stallStreak + 1 };
+    if (startBuild !== null) return lookAgain(back, "the game changed as its turn started", log);
+    const unknown = { ...back, stallStreak: back.stallStreak + 1 };
     return unknown.stallStreak >= STALL_LIMIT
       ? end(unknown, "stalled", "keep going could not tell which build its steps started from", log)
       : go(unknown, LOOK, log);
   }
-  // A step that changed nothing is set aside, so the same step is never sent
-  // again as it was: the policy has nothing new to add to it.
+  // A step that finished and changed nothing is set aside, so the same step is
+  // never sent again as it was: the policy has nothing new to add to it. One
+  // the time cap cut off before it changed anything is finished instead.
   if (result.build === null || result.files === 0) {
-    const record = recordOf(state, cycle, input.now, {
+    const record = recordOf(back, cycle, input.now, {
       verdict: "no-change",
       reason: "the turn changed no game files",
       gain: false,
       failure: "no-change",
     });
-    const aside = setAside(state, {
-      key: turn.proposal.key,
-      text: record.move,
-      why: unchangedWhy(turn.proposal.why),
-    });
-    return settle(aside, record, `step ${n} changed nothing`);
+    const aside =
+      result.outcome === "capped"
+        ? back
+        : setAside(back, {
+            key: turn.proposal.key,
+            text: record.move,
+            why: unchangedWhy(turn.proposal.why),
+          });
+    return settle(aside, record, cycle, `step ${n} changed nothing`);
   }
-  return go(
-    state,
-    { kind: "judge", build: result.build, base: startBuild },
-    `step ${n}: measuring`,
-  );
+  return go(back, { kind: "judge", build: result.build, base: startBuild }, `step ${n}: measuring`);
 };
 
 const worseOf = (cycle: Cycle & { readonly judge: JudgeResult }) =>
@@ -959,6 +1014,7 @@ export const applyJudge = (
         gain: gain({ verdict: "not-measured", files: result.files }),
         failure: "harness",
       }),
+      cycle,
       `step ${n} kept, not measured: ${why}`,
     );
   if (judge.build === null) return notMeasured("the step's build could not be measured");
@@ -985,6 +1041,7 @@ export const applyJudge = (
       delta: chips(deltas, []),
       ...(missed ? { failure: "game" as const } : {}),
     }),
+    cycle,
     `step ${n} kept`,
   );
 };
@@ -1011,6 +1068,7 @@ export const applyUndo = (
         delta: chips(deltas, worseOf(cycle)),
         failure: "game",
       }),
+      cycle,
       log,
     );
   switch (undo.why) {
@@ -1025,6 +1083,7 @@ export const applyUndo = (
           delta: chips(deltas, worseOf(cycle)),
           failure: "game",
         }),
+        cycle,
         `step ${n} undone (${undo.why === "restored" ? why : "by the person"})`,
       );
     case "moved-on":
@@ -1194,8 +1253,6 @@ const planned = (seq: number, plan: Plan): GameRunStep["step"] => {
   switch (plan.kind) {
     case "look":
       return { kind: "look", id: seq };
-    case "propose":
-      return { kind: "propose", id: seq, proposal: plan.proposal, deadline: plan.deadline };
     case "turn":
       return { ...plan, id: seq };
     case "judge":
@@ -1205,33 +1262,17 @@ const planned = (seq: number, plan: Plan): GameRunStep["step"] => {
   }
 };
 
-/** A planned step's effect: a proposal's deadline, or the job that does the step's work. */
-const effectsOf = (record: GameRunStep): GameRunEffect[] =>
-  record.step.kind === "propose"
-    ? record.step.deadline === null
-      ? []
-      : [
-          {
-            request: {
-              type: "game-run.decision.deadline",
-              runId: record.runId,
-              stepId: record.id,
-              decisionId: record.id,
-            },
-            availableAt: record.step.deadline,
-            holdsThread: false,
-          },
-        ]
-    : [
-        {
-          request: {
-            type: "game-run.step.execute",
-            runId: record.runId,
-            stepId: record.id,
-            attempt: record.attempt,
-          },
-        },
-      ];
+/** A planned step's effect: the job that does the step's work. */
+const effectsOf = (record: GameRunStep): GameRunEffect[] => [
+  {
+    request: {
+      type: "game-run.step.execute",
+      runId: record.runId,
+      stepId: record.id,
+      attempt: record.attempt,
+    },
+  },
+];
 
 /** A judge or an undo cut off by a pause runs again on resume; any other step looks afresh. */
 const keptOnPause = (record: GameRunStep | null) =>
@@ -1271,7 +1312,7 @@ const land = (
   const held = ended && keptOnPause(options.held ?? null) ? (options.held?.seq ?? null) : null;
   const updated: GameRun = {
     ...withState(run, next.state),
-    status: ended ? "ended" : step?.step.kind === "propose" ? "waiting" : "running",
+    status: ended ? "ended" : "running",
     seq,
     inFlight: ended ? held : (step?.seq ?? null),
     endedAt: ended ? work.iso : run.endedAt,
@@ -1331,7 +1372,8 @@ const start = (work: Work, command: Command<"game-run.start">) => {
     );
   if (work.records.runs.some((r) => r.id === command.runId))
     return refuse("stale-run", `Run ${command.runId} already exists in this chat.`);
-  // The person's waiting notes outlive a run: a new one on the game takes them up.
+  // A direction not done outlives its run: a new one on the game takes it up, unless the
+  // person gives it one of their own.
   const carried = elsewhere?.steer ?? prior?.steer ?? [];
   const run: GameRun = {
     id: command.runId,
@@ -1339,12 +1381,11 @@ const start = (work: Work, command: Command<"game-run.start">) => {
     projectId: work.records.projectId,
     lane: command.lane,
     engine: command.engine,
-    profile: command.profile,
     budgetMinutes: command.budgetMinutes,
-    budgetEndsAt: command.budgetMinutes === null ? null : work.now + command.budgetMinutes * 60_000,
+    budgetUsedMs: 0,
     status: "running",
     ending: null,
-    steer: [...carried],
+    steer: command.direction === undefined ? [...carried] : [command.direction.trim()],
     setAside: [],
     stallStreak: 0,
     supersededStreak: 0,
@@ -1377,13 +1418,13 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
     const elsewhere = work.records.projectRun;
     if (elsewhere !== null && elsewhere.id !== run.id && elsewhere.status !== "ended")
       return refuse("run-live", "Keep going is on in another chat of this game.");
-    const budgetMinutes =
-      command.budgetMinutes === undefined ? run.budgetMinutes : command.budgetMinutes;
+    // A resume is a fresh budget: the one before it was spent or the person stopped it.
     const resumed: GameRun = {
       ...run,
-      profile: command.profile ?? run.profile,
-      budgetMinutes,
-      budgetEndsAt: budgetMinutes === null ? null : work.now + budgetMinutes * 60_000,
+      budgetMinutes:
+        command.budgetMinutes === undefined ? run.budgetMinutes : command.budgetMinutes,
+      budgetUsedMs: 0,
+      ...(command.direction === undefined ? {} : { steer: [command.direction.trim()] }),
       ending: null,
       lastFailure: "",
       // A resume starts both streaks afresh, so it always takes a step.
@@ -1429,7 +1470,7 @@ const resume = (work: Work, command: Command<"game-run.resume">) =>
 /**
  * Off, or the server's own pause for a tool that kept failing. The step in
  * flight is cancelled; a judge or undo stays the run's for a resume to run
- * again. A step turn that had started gives its notes back.
+ * again. The direction stays the run's for its resume.
  */
 const stop = (work: Work, command: Command<"game-run.stop">) =>
   Result.flatMap(current(work, command.runId), (run) => {
@@ -1442,13 +1483,13 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
     const paused = command.ending === "tool-failed";
     const line = paused ? `paused: ${why}` : `stopped${why.length > 0 ? `: ${why}` : ""}`;
     const turn = inFlight?.step.kind === "turn" ? inFlight.step : null;
-    const giveBack = turn !== null && inFlight?.status === "running" && turn.steer.length > 0;
+    const steer = turn === null ? run.steer : keepDirection(stateOf(work, run), turn).steer;
     const ended: GameRun = {
       ...run,
       status: "ended",
       ending: paused ? "tool-failed" : "stopped",
       lastFailure: why.slice(0, 600),
-      steer: giveBack ? [...turn.steer, ...run.steer] : run.steer,
+      steer: [...steer],
       inFlight: keptOnPause(inFlight) ? run.inFlight : null,
       endedAt: work.iso,
       updatedAt: work.iso,
@@ -1476,129 +1517,40 @@ const stop = (work: Work, command: Command<"game-run.stop">) =>
 const proposalBase = (work: Work, record: GameRunStep) =>
   resultOf(cycleStep(work, record, 1)?.result, "look")?.current ?? null;
 
-/** The pending proposal gives way: it is answered, then the policy goes on from `next`. */
-const answerProposal = (
-  work: Work,
-  run: GameRun,
-  record: GameRunStep,
-  result: StepResult<"decided">,
-  next: Next,
-) => Result.succeed(land(work, run, next, finish(work, record, result, next.log)));
-
 /**
- * The person's note for the next step, from any chat of the game. A live run
- * takes it at its next look; a pending Guided proposal gives way to it at
- * once, since the person asked for it. An ended run keeps it for its resume.
+ * The person's words added to the run's direction, from any chat of the game. A live run takes
+ * them at its next look; an ended run keeps them for its resume.
  */
 const steer = (work: Work, command: Command<"game-run.steer">) =>
-  Result.flatMap(current(work, command.runId), (run) => {
-    const noted: GameRun = { ...run, steer: [...run.steer, command.note.trim()] };
-    const state = stateOf(work, noted);
-    const record = run.status === "ended" ? null : inFlightOf(work, run);
-    if (record?.step.kind === "propose") {
-      const proposal = steerProposal(state);
-      if (proposal !== null && !state.setAside.some((entry) => entry.key === proposal.key))
-        return answerProposal(
-          work,
-          noted,
-          record,
-          { kind: "decided", answer: "superseded", by: "creator" },
-          startTurn(state, proposal, proposalBase(work, record), "creator", work.now),
-        );
-    }
-    return only([runEvent(work, { ...noted, updatedAt: work.iso })]);
-  });
-
-const profileSet = (work: Work, command: Command<"game-run.profile.set">) =>
-  Result.flatMap(live(work, command.runId), (run) => {
-    const switched: GameRun = { ...run, profile: command.profile };
-    const record = inFlightOf(work, run);
-    // Nobody needs to answer Autopilot: the pending proposal starts now.
-    if (command.profile === "autopilot" && record?.step.kind === "propose")
-      return answerProposal(
-        work,
-        switched,
-        record,
-        { kind: "decided", answer: "start", by: "server" },
-        startTurn(
-          stateOf(work, switched),
-          record.step.proposal,
-          proposalBase(work, record),
-          "autopilot",
-          work.now,
-        ),
-      );
-    return only([runEvent(work, { ...switched, updatedAt: work.iso })]);
-  });
-
-const pendingProposal = (work: Work, run: GameRun, decisionId: string) => {
-  const record = inFlightOf(work, run);
-  if (record === null || record.step.kind !== "propose")
-    return refuse(
-      "no-decision",
-      "Keep going has no proposal waiting now; it may have started already.",
-    );
-  if (record.id !== decisionId)
-    return refuse(
-      "stale-decision",
-      `Proposal ${decisionId} is not the one waiting; ${record.id} is.`,
-    );
-  return Result.succeed({ record, step: record.step });
-};
-
-/** The person's answer to a Guided proposal: Start now, Skip, or hold it while they edit it. */
-const decideCommand = (work: Work, command: Command<"game-run.decide">) =>
-  Result.flatMap(live(work, command.runId), (run) =>
-    Result.flatMap(pendingProposal(work, run, command.decisionId), ({ record, step }) => {
-      if (command.answer === "hold")
-        // The deadline effect still fires, and finds nothing due.
-        return only([
-          stepEvent(work, {
-            ...record,
-            step: { ...step, deadline: null },
-            logs: [...record.logs, "held for the person"],
-          }),
-          runEvent(work, { ...run, updatedAt: work.iso }),
-        ]);
-      return answerProposal(
-        work,
-        run,
-        record,
-        { kind: "decided", answer: command.answer, by: "creator" },
-        applyDecided(
-          stateOf(work, run),
-          step.proposal,
-          proposalBase(work, record),
-          command.answer,
-          "creator",
-          work.now,
-        ),
-      );
-    }),
+  Result.flatMap(current(work, command.runId), (run) =>
+    only([
+      runEvent(work, { ...run, steer: [...run.steer, command.note.trim()], updatedAt: work.iso }),
+    ]),
   );
 
-/** The proposal's deadline fired: the default starts it, unless it was held or answered. */
+/**
+ * A proposal an earlier Kurambit's Guided mode left waiting starts now: keep going has one mode,
+ * which never waits on a countdown. Its deadline effect, or recovery, asks for it.
+ */
 const expire = (work: Work, command: Command<"game-run.decision.expire">) =>
-  Result.flatMap(live(work, command.runId), (run) =>
-    Result.flatMap(pendingProposal(work, run, command.decisionId), ({ record, step }) =>
-      step.deadline === null || work.now < step.deadline
-        ? refuse("not-due", `Proposal ${record.id} is not due.`)
-        : answerProposal(
-            work,
-            run,
-            record,
-            { kind: "decided", answer: "start", by: "default" },
-            applyDecided(
-              stateOf(work, run),
-              step.proposal,
-              proposalBase(work, record),
-              "start",
-              "default",
-              work.now,
-            ),
-          ),
-    ),
-  );
+  Result.flatMap(live(work, command.runId), (run) => {
+    const record = inFlightOf(work, run);
+    if (record === null || record.step.kind !== "propose")
+      return refuse("no-decision", "Keep going has no proposal waiting.");
+    if (record.id !== command.decisionId)
+      return refuse(
+        "stale-decision",
+        `Proposal ${command.decisionId} is not the one waiting; ${record.id} is.`,
+      );
+    const next = applyDecided(
+      stateOf(work, run),
+      record.step.proposal,
+      proposalBase(work, record),
+      "start",
+    );
+    const decided: GameRunStepResult = { kind: "decided", answer: "start", by: "server" };
+    return Result.succeed(land(work, run, next, finish(work, record, decided, next.log)));
+  });
 
 /** A step's timer, set by its own work: the turn's cap again, a resend, or its work again later. */
 const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
@@ -1638,10 +1590,7 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
     }),
   );
 
-/**
- * A step's work began. A turn step's turn is running: it takes the notes it
- * carries off the front of the run's steer and starts its cap.
- */
+/** A step's work began. A turn step's turn is running: its cap starts. */
 const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId, command.attempt), (record) => {
@@ -1655,14 +1604,7 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
       if (record.step.kind !== "turn") return only([stepEvent(work, started)]);
       const turn = record.step;
       return only(
-        [
-          stepEvent(work, started),
-          runEvent(work, {
-            ...run,
-            steer: run.steer.slice(turn.steer.length),
-            updatedAt: work.iso,
-          }),
-        ],
+        [stepEvent(work, started)],
         [
           {
             request: {
@@ -1699,13 +1641,10 @@ const nextOf = (
   record: GameRunStep,
   result: GameRunStepResult,
 ): Result.Result<Next, GameRunRefusal> => {
-  // A started turn that ends without landing gives back the notes its start
-  // took, whichever way it ends, so no note of the person's is lost.
+  // A turn that ends without landing keeps the direction it carried, whichever way it ends.
   const state =
-    (result.kind === "ended" || result.kind === "failed") &&
-    record.step.kind === "turn" &&
-    record.status === "running"
-      ? giveBackSteer(stateOf(work, run), record.step, true)
+    (result.kind === "ended" || result.kind === "failed") && record.step.kind === "turn"
+      ? keepDirection(stateOf(work, run), record.step)
       : stateOf(work, run);
   // Nothing was measured: the run pauses with why, and judges nothing (a
   // judge or undo runs again on resume).
@@ -1723,16 +1662,14 @@ const nextOf = (
   switch (step.kind) {
     case "look": {
       const look = resultOf(result, "look");
-      return look === null ? wrong() : Result.succeed(applyLook(state, look, work.now));
+      return look === null ? wrong() : Result.succeed(applyLook(state, look));
     }
     case "propose": {
       // Only the server reports on a proposal: a turn started on the game.
       const decided = resultOf(result, "decided");
       return decided === null || decided.answer !== "superseded"
-        ? refuse("wrong-kind", "A proposal is answered with game-run.decide.")
-        : Result.succeed(
-            applyDecided(state, step.proposal, null, "superseded", "server", work.now),
-          );
+        ? refuse("wrong-kind", "A proposal is started with game-run.decision.expire.")
+        : Result.succeed(applyDecided(state, step.proposal, null, "superseded"));
     }
     case "turn": {
       const turn = resultOf(result, "turn");
@@ -1808,10 +1745,6 @@ export const decide = (
       return resume(work, command);
     case "game-run.steer":
       return steer(work, command);
-    case "game-run.profile.set":
-      return profileSet(work, command);
-    case "game-run.decide":
-      return decideCommand(work, command);
     case "game-run.decision.expire":
       return expire(work, command);
     case "game-run.step.start":

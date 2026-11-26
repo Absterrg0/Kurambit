@@ -1,4 +1,4 @@
-import type { GameBuild, GameBuildId, GameBuildRef, GameRunProfile } from "@kurambit/contracts";
+import type { GameBuild, GameBuildId, GameBuildRef } from "@kurambit/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -66,17 +66,12 @@ interface GameWorkspaceStoreState {
   pauseWhenAway: boolean;
   setPauseWhenAway: (on: boolean) => void;
   /**
-   * Chats whose Send starts Keep going, in the mode it starts in, by thread key. Absent: Send
-   * sends the message once. Not persisted.
+   * What the person picked for a chat's Send in the composer's run picker, by thread key. Absent:
+   * the picker follows the chat's run (runPick), Keep going while it is on there. Not persisted.
    */
-  keepGoingPick: Readonly<Record<string, GameRunProfile>>;
-  /** The composer's run picker: once, or Keep going in a mode. One excludes the other. */
-  pickRun: (
-    threadKey: string,
-    pick:
-      | { readonly kind: "once" }
-      | { readonly kind: "keep-going"; readonly profile: GameRunProfile },
-  ) => void;
+  keepGoingPick: Readonly<Record<string, "once" | "keep-going">>;
+  /** The composer's run picker: Once or Keep going; null follows the chat's run again. */
+  pickRun: (threadKey: string, pick: "once" | "keep-going" | null) => void;
   /** The Workbench beside the game is open, for every game. */
   workbenchOpen: boolean;
   setWorkbenchOpen: (open: boolean) => void;
@@ -148,12 +143,12 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
 
       keepGoingPick: {},
       pickRun: (threadKey, pick) => {
-        if (pick.kind !== "once") openGameTool("keep-going");
+        if (pick === "keep-going") openGameTool("keep-going");
         set((state) => ({
           keepGoingPick:
-            pick.kind === "keep-going"
-              ? { ...state.keepGoingPick, [threadKey]: pick.profile }
-              : without(state.keepGoingPick, threadKey),
+            pick === null
+              ? without(state.keepGoingPick, threadKey)
+              : { ...state.keepGoingPick, [threadKey]: pick },
         }));
       },
     }),

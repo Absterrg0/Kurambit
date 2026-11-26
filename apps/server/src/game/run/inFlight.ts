@@ -1,7 +1,8 @@
 // A keep-going run's step in flight, as the turn reactor, the step runner and
-// the game's builds read it, and the one way a pending proposal is superseded:
-// anything that changes the game before a Guided step starts (a turn in any
-// chat, a restore) means the proposal read a folder that is gone.
+// the game's builds read it, and the one way a pending proposal (one an earlier
+// Kurambit's Guided mode left, until recovery starts it) is superseded: anything
+// that changes the game first (a turn in any chat, a restore) means the
+// proposal read a folder that is gone.
 import {
   type GameRun,
   type GameRunStep,

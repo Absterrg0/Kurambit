@@ -160,13 +160,14 @@ export const GameRunTurnStep = Schema.Struct({
   kind: Schema.Literal("turn"),
   id: Schema.Number,
   proposal: GameRunProposal,
-  /** The steer entries this message carries: the captured prefix of GameRun.steer. */
+  /** The person's direction this message carries: GameRun.steer as the step was planned. */
   steer: Schema.Array(Schema.String),
   /** The folder's build at the look; the reactor compares nothing against it, it is for the record. */
   base: Schema.NullOr(GameBuildId),
+  /** The most of the agent's own time the turn may take: waits on Kurambit's tools do not count. */
   capMs: Schema.Number,
-  /** How the step started: the person's Start now, the Guided default, or Autopilot. */
-  startedBy: Schema.Literals(["creator", "default", "autopilot"]),
+  /** How an earlier Kurambit started the step (its Guided and Autopilot modes); unread. */
+  startedBy: Schema.optionalKey(Schema.Literals(["creator", "default", "autopilot"])),
 });
 export type GameRunTurnStep = typeof GameRunTurnStep.Type;
 export const GameRunJudgeStep = Schema.Struct({
@@ -286,12 +287,15 @@ export const GameRunStepResult = Schema.Union([
     /** Files the turn changed in the lane, art/ and ASSETS.md, since `startBuild`. */
     files: NonNegativeInt,
     tokens: Schema.NullOr(Schema.Number),
+    /** The turn's working time: its runs' own, so time the app was off between them is not in it. */
     elapsedMs: Schema.Number,
     /** The person steered this turn (steer_active into it). */
     personSteered: Schema.Boolean,
     reason: Schema.String,
     /** What the step did, from its reply's first sentence; absent on records written before it. */
     did: Schema.optionalKey(Schema.String),
+    /** Its reply said the person's direction it carried is done (`Direction: done`). */
+    done: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.Struct({
     kind: Schema.Literal("judge"),
@@ -330,14 +334,22 @@ export const GameRun = Schema.Struct({
    * decodes: runs recorded before Godot and Unity were removed name them, and events replay.
    */
   engine: Schema.optionalKey(Schema.String),
-  profile: GameRunProfile,
+  /** The mode an earlier Kurambit ran it in; every run now takes its steps at once. */
+  profile: Schema.optionalKey(GameRunProfile),
   budgetMinutes: Schema.NullOr(Schema.Number),
-  /** Epoch ms; null without a budget. */
-  budgetEndsAt: Schema.NullOr(Schema.Number),
+  /** An earlier Kurambit's wall-clock end of the budget, which counted time the app was off; unread. */
+  budgetEndsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** The budget spent: the working time of the steps' turns (TurnResult.elapsedMs); absent is 0. */
+  budgetUsedMs: Schema.optionalKey(Schema.Number),
   status: GameRunStatus,
   ending: Schema.NullOr(GameRunEnding),
-  /** The person's notes for the next step. */
+  /**
+   * The person's direction: their words for keep going, each kept (and in every step's briefing)
+   * until a step that carried it says it is done.
+   */
   steer: Schema.Array(Schema.String),
+  /** A step Kurambit's time cap stopped: the next step finishes it, once. */
+  finish: Schema.optionalKey(Schema.Struct({ n: PositiveInt, proposal: GameRunProposal })),
   /** Never-repeat: proposals the run will not make again, with why. */
   setAside: Schema.optionalKey(
     Schema.Array(Schema.Struct({ key: Schema.String, text: Schema.String, why: Schema.String })),

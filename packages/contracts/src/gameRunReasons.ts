@@ -1,6 +1,9 @@
 import * as Schema from "effect/Schema";
 
-/** Guided proposes each step and starts it after a minute; Autopilot starts it at once. */
+/**
+ * The two modes an earlier Kurambit ran keep going in. Runs it recorded still carry one, so it
+ * still decodes; keep going now has one mode, which takes each step at once.
+ */
 export const GameRunProfile = Schema.Literals(["guided", "autopilot"]);
 export type GameRunProfile = typeof GameRunProfile.Type;
 

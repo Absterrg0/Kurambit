@@ -14,17 +14,16 @@ export const NEVER_RAN: GameKeepGoingStatus = {
   runId: null,
   chat: null,
   mode: "off",
-  profile: null,
   phase: null,
   step: null,
-  proposal: null,
   budgetMinutes: null,
-  endsAt: null,
+  budgetLeftMinutes: null,
   steps: [],
   firstStep: null,
   steer: [],
   setAside: [],
   ending: null,
+  endedAt: null,
   resumable: false,
   blocked: null,
   message: "Keep going is off.",
@@ -35,15 +34,15 @@ export const NO_TURN_LOOP: GameKeepGoingStatus = {
   blocked: "Keep going needs an engine Kurambit plays after every turn (three.js)",
 };
 
-export const AUTOPILOT_TURN: GameKeepGoingStatus = {
+export const LIVE_TURN: GameKeepGoingStatus = {
   ...NEVER_RAN,
   runId: "run-7",
   chat: MAIN_CHAT,
-  mode: "autopilot",
+  mode: "on",
   phase: "turn",
   step: 3,
   budgetMinutes: 60,
-  endsAt: "2026-11-06T15:10:00.000Z",
+  budgetLeftMinutes: 40,
   steps: [
     {
       n: 2,
@@ -75,34 +74,14 @@ export const AUTOPILOT_TURN: GameKeepGoingStatus = {
   message: "Keep going · step 3 · your agent is working on it",
 };
 
-const PROPOSAL = {
-  stepId: "run-7:step:14",
-  why: "regression",
-  summary: "Try the undone step another way, or a smaller one",
-  text: "Your last step (Masher wins at 9 s with no skill.) was undone: Random input now crashes at 12 s.\nReach the same goal another way, or take a smaller step.",
-  deadline: "2026-11-06T14:32:00.000Z",
-} as const;
-
-export const GUIDED_PROPOSED: GameKeepGoingStatus = {
-  ...AUTOPILOT_TURN,
-  mode: "guided",
-  phase: "proposed",
-  proposal: PROPOSAL,
-};
-
-export const GUIDED_HELD: GameKeepGoingStatus = {
-  ...GUIDED_PROPOSED,
-  phase: "held",
-  proposal: { ...PROPOSAL, deadline: null },
-};
-
 export const PAUSED_STALLED: GameKeepGoingStatus = {
-  ...AUTOPILOT_TURN,
+  ...LIVE_TURN,
   mode: "off",
   phase: null,
   step: null,
-  endsAt: null,
+  budgetLeftMinutes: 20,
   ending: "stalled",
+  endedAt: "2026-11-06T14:40:00.000Z",
   resumable: true,
   message:
     "Keep going paused: the last two steps kept nothing; each changed nothing or was undone. Tell your agent what to do next, or turn it on to try again.",

@@ -47,6 +47,58 @@ const run = (
 const moveOf = (runs: ReadonlyArray<OrchestrationV2Run>, started = false) =>
   GameRunTurnReactor.stepTurnMove(GameRunTurnReactor.stepChain(runs, STEP), runs, started).kind;
 
+// The cap and the budget count the agent's own time: G2's step was cut with 11.7 of its 14.8
+// minutes spent in game_check and Blender, and G1's hour ran out while the app was off.
+describe("a step turn's time", () => {
+  const minute = (m: number) => DateTime.makeUnsafe(Date.UTC(2026, 10, 7, 10, m, 0));
+  const tool = (
+    runId: string,
+    name: string,
+    from: number,
+    to: number | null,
+    status: "completed" | "running" = "completed",
+  ) =>
+    ({
+      runId: RunId.make(runId),
+      type: "dynamic_tool",
+      toolName: name,
+      status,
+      startedAt: minute(from),
+      completedAt: to === null ? null : minute(to),
+    }) as const;
+
+  it("leaves out the time between a cut-off run and its continuation, and waits on Kurambit's tools", () => {
+    const cut = run(1, {
+      status: "cancelled",
+      userMessageId: STEP,
+      startedAt: minute(0),
+      // T3 marks the cut-off run when the app is back, an hour later.
+      completedAt: minute(60),
+    });
+    const continued = run(2, {
+      status: "running",
+      startedAt: minute(61),
+      restartContinuationOfRunId: RunId.make("run-1"),
+    });
+    const time = GameRunTurnReactor.stepTurnTime(
+      [cut, continued],
+      [
+        tool("run-1", "mcp__kurambit__game_check", 2, 6),
+        tool("run-1", "edit", 7, 8),
+        // Two waits at once count once.
+        tool("run-2", "mcp__kurambit__game_blender", 62, 66),
+        tool("run-2", "mcp__kurambit__game_check", 64, 67),
+        tool("run-2", "mcp__kurambit__game_blender", 69, null, "running"),
+      ],
+      Date.UTC(2026, 10, 7, 11, 10, 0),
+    );
+    // Run 1 ends at its last activity (minute 8), run 2 runs on to now (minute 70).
+    expect(time.live).toBe((8 + 9) * 60_000);
+    // Waits: 4 minutes in run 1, 5 (62–67) and 1 (69–70) in run 2.
+    expect(time.own).toBe((17 - 10) * 60_000);
+  });
+});
+
 describe("a step's turn", () => {
   it("is cancelled when it comes up queued behind the person's message", () => {
     const person = run(1, { status: "running", startedAt: at(10) });

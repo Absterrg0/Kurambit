@@ -2,10 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { GameBuildId, ThreadId, type GameBuild, type GameStepVerdict } from "@kurambit/contracts";
 
 import {
-  AUTOPILOT_TURN,
   FINISHED_DONE,
-  GUIDED_HELD,
-  GUIDED_PROPOSED,
+  LIVE_TURN,
   MAIN_CHAT,
   NEVER_RAN,
   NO_TURN_LOOP,
@@ -18,52 +16,48 @@ import {
   keepGoingHidesNext,
   keepGoingRequest,
   reelHeading,
+  runPick,
   reelSteps,
   stepVerdictText,
 } from "./keepGoing.logic";
 
-const clock = (at: string) => at.slice(11, 16);
 const control = (
   status: Parameters<typeof keepGoingControlView>[0]["status"],
   overrides: Partial<Parameters<typeof keepGoingControlView>[0]> = {},
 ) =>
-  keepGoingControlView(
-    {
-      status,
-      error: null,
-      threadId: MAIN_CHAT,
-      canOperate: true,
-      sending: false,
-      chosenBudget: undefined,
-      ...overrides,
-    },
-    clock,
-  );
+  keepGoingControlView({
+    status,
+    error: null,
+    threadId: MAIN_CHAT,
+    canOperate: true,
+    sending: false,
+    chosenBudget: undefined,
+    ...overrides,
+  });
 
 describe("the keep-going control", () => {
   it("is off with a one-hour budget on a game that never ran it", () => {
     const view = control(NEVER_RAN);
     expect(view).toMatchObject({
       pressed: false,
-      value: "off",
       disabled: null,
       modesDisabled: null,
       budget: 60,
       budgetDisabled: false,
-      budgetLabel: "Budget",
+      budgetLabel: "Keep going's budget",
     });
   });
 
-  it("names the live mode, is pressed, and holds the budget at its end time", () => {
-    expect(control(AUTOPILOT_TURN)).toMatchObject({
+  it("is pressed while on here, and holds the budget at what is left of it", () => {
+    expect(control(LIVE_TURN)).toMatchObject({
       pressed: true,
-      value: "autopilot",
       budgetDisabled: true,
-      budgetLabel: "Until 15:10",
+      budgetLabel: "40 min left",
     });
-    expect(control({ ...AUTOPILOT_TURN, budgetMinutes: null, endsAt: null }).budgetLabel).toBe(
-      "No limit",
-    );
+    expect(control({ ...LIVE_TURN, budgetLeftMinutes: 120 }).budgetLabel).toBe("2 hours left");
+    expect(
+      control({ ...LIVE_TURN, budgetMinutes: null, budgetLeftMinutes: null }).budgetLabel,
+    ).toBe("No limit");
   });
 
   it("is disabled with its reason on an engine without a turn loop, and without permission", () => {
@@ -76,7 +70,7 @@ describe("the keep-going control", () => {
   });
 
   it("leaves Off enabled in another chat while the run is live there", () => {
-    const blocked = { ...AUTOPILOT_TURN, blocked: "Keep going is on in Main chat" };
+    const blocked = { ...LIVE_TURN, blocked: "Keep going is on in Main chat" };
     const view = control(blocked, { threadId: OTHER_CHAT });
     expect(view).toMatchObject({
       pressed: false,
@@ -89,95 +83,83 @@ describe("the keep-going control", () => {
   it("keeps the run's own budget on a resume unless the person picked one", () => {
     expect(control(PAUSED_STALLED).budget).toBe(60);
     expect(control(PAUSED_STALLED, { chosenBudget: null }).budget).toBeNull();
-    expect(keepGoingRequest(PAUSED_STALLED, MAIN_CHAT, "guided", undefined)).toEqual({
-      mode: "guided",
-    });
-    expect(keepGoingRequest(PAUSED_STALLED, MAIN_CHAT, "autopilot", 120)).toEqual({
-      mode: "autopilot",
+    expect(keepGoingRequest(PAUSED_STALLED, MAIN_CHAT, "on", undefined)).toEqual({ mode: "on" });
+    expect(keepGoingRequest(PAUSED_STALLED, MAIN_CHAT, "on", 120)).toEqual({
+      mode: "on",
       budgetMinutes: 120,
     });
   });
 
-  it("sends nothing for the mode it already has, or Off with nothing live", () => {
-    expect(keepGoingRequest(AUTOPILOT_TURN, MAIN_CHAT, "autopilot", 30)).toBeNull();
+  it("sends nothing to turn it on while on here, or Off with nothing live", () => {
+    expect(keepGoingRequest(LIVE_TURN, MAIN_CHAT, "on", 30)).toBeNull();
     expect(keepGoingRequest(NEVER_RAN, MAIN_CHAT, "off", undefined)).toBeNull();
-    expect(keepGoingRequest(AUTOPILOT_TURN, MAIN_CHAT, "guided", undefined)).toEqual({
-      mode: "guided",
-    });
+  });
+});
+
+describe("the run picker", () => {
+  // After a restart the store holds no pick: the picker must read what the banner reads.
+  it("follows the run on in this chat unless the person picked", () => {
+    expect(runPick(undefined, LIVE_TURN, MAIN_CHAT)).toBe("keep-going");
+    expect(runPick(undefined, LIVE_TURN, OTHER_CHAT)).toBe("once");
+    expect(runPick(undefined, PAUSED_STALLED, MAIN_CHAT)).toBe("once");
+    expect(runPick("once", LIVE_TURN, MAIN_CHAT)).toBe("once");
+    expect(runPick("keep-going", NEVER_RAN, MAIN_CHAT)).toBe("keep-going");
   });
 });
 
 describe("the keep-going banner", () => {
-  it("shows the proposal with its start time, and waits while held", () => {
-    expect(keepGoingBannerView(GUIDED_PROPOSED, MAIN_CHAT, clock)).toMatchObject({
-      kind: "proposal",
-      lead: "Step 3:",
-      line: "Try the undone step another way, or a smaller one",
-      detail: "at 14:32",
-      why: "after an undo",
-      held: false,
-    });
-    expect(keepGoingBannerView(GUIDED_HELD, MAIN_CHAT, clock)).toMatchObject({
-      detail: "waits for you",
-      held: true,
-    });
-  });
-
   it("says what the live run is doing, phase by phase", () => {
-    const title = (status: typeof AUTOPILOT_TURN) => {
-      const view = keepGoingBannerView(status, MAIN_CHAT, clock);
+    const title = (status: typeof LIVE_TURN) => {
+      const view = keepGoingBannerView(status, MAIN_CHAT);
       return view?.kind === "live" ? view.title : null;
     };
-    expect(title(AUTOPILOT_TURN)).toBe("Keep going · step 3 · your agent is working on it");
-    expect(keepGoingBannerView(AUTOPILOT_TURN, MAIN_CHAT, clock)).toMatchObject({
+    expect(title(LIVE_TURN)).toBe("Keep going · step 3 · your agent is working on it");
+    expect(keepGoingBannerView(LIVE_TURN, MAIN_CHAT)).toMatchObject({
       line: "Keep going · step 3",
     });
-    expect(title({ ...AUTOPILOT_TURN, phase: "waiting" })).toBe(
-      "Keep going · waits for this turn to end · until 15:10",
+    expect(title({ ...LIVE_TURN, phase: "waiting" })).toBe(
+      "Keep going · waits for this turn to end · 40 min left",
     );
-    expect(title({ ...AUTOPILOT_TURN, phase: "looking", step: null })).toBe(
+    expect(title({ ...LIVE_TURN, phase: "looking", step: null })).toBe(
       "Keep going · reading the current build's checks",
     );
-    expect(title({ ...AUTOPILOT_TURN, phase: "measuring" })).toBe(
+    expect(title({ ...LIVE_TURN, phase: "measuring" })).toBe(
       "Keep going · step 3 · measuring the build before keeping it",
     );
-    expect(title({ ...AUTOPILOT_TURN, phase: "undoing", step: 2 })).toBe(
+    expect(title({ ...LIVE_TURN, phase: "undoing", step: 2 })).toBe(
       "Undoing step 2: Random input now crashes at 12 s",
     );
   });
 
-  it("reads a pause with Resume in its last mode, and the end without one", () => {
-    expect(keepGoingBannerView(PAUSED_STALLED, MAIN_CHAT, clock)).toMatchObject({
+  it("reads a pause with Resume and the end without one, until the person sends a turn", () => {
+    expect(keepGoingBannerView(PAUSED_STALLED, MAIN_CHAT)).toMatchObject({
       kind: "paused",
       title: PAUSED_STALLED.message,
-      resume: "guided",
     });
-    expect(
-      keepGoingBannerView({ ...PAUSED_STALLED, profile: "autopilot" }, MAIN_CHAT, clock),
-    ).toMatchObject({ resume: "autopilot" });
-    expect(keepGoingBannerView(FINISHED_DONE, MAIN_CHAT, clock)).toMatchObject({
+    expect(keepGoingBannerView(FINISHED_DONE, MAIN_CHAT)).toMatchObject({
       kind: "ended",
       title: FINISHED_DONE.message,
     });
+    // The step turns before the pause leave it; the person's next message retires it.
+    expect(
+      keepGoingBannerView(PAUSED_STALLED, MAIN_CHAT, "2026-11-06T14:35:00.000Z"),
+    ).toMatchObject({ kind: "paused" });
+    expect(keepGoingBannerView(PAUSED_STALLED, MAIN_CHAT, "2026-11-06T18:00:00.000Z")).toBeNull();
   });
 
   it("shows only in the run's own chat, and never for a game that never ran it", () => {
-    expect(keepGoingBannerView(AUTOPILOT_TURN, OTHER_CHAT, clock)).toBeNull();
-    expect(keepGoingBannerView(NEVER_RAN, MAIN_CHAT, clock)).toBeNull();
+    expect(keepGoingBannerView(LIVE_TURN, OTHER_CHAT)).toBeNull();
+    expect(keepGoingBannerView(NEVER_RAN, MAIN_CHAT)).toBeNull();
   });
 
   it("says nothing once the person turned it off", () => {
-    expect(
-      keepGoingBannerView({ ...PAUSED_STALLED, ending: "stopped" }, MAIN_CHAT, clock),
-    ).toBeNull();
+    expect(keepGoingBannerView({ ...PAUSED_STALLED, ending: "stopped" }, MAIN_CHAT)).toBeNull();
   });
 
-  it("hides the Next banner on Autopilot and while a proposal is pending", () => {
-    expect(keepGoingHidesNext(AUTOPILOT_TURN, MAIN_CHAT)).toBe(true);
-    expect(keepGoingHidesNext(GUIDED_PROPOSED, MAIN_CHAT)).toBe(true);
-    expect(keepGoingHidesNext({ ...GUIDED_PROPOSED, proposal: null }, MAIN_CHAT)).toBe(false);
+  it("hides the Next banner while on here", () => {
+    expect(keepGoingHidesNext(LIVE_TURN, MAIN_CHAT)).toBe(true);
     expect(keepGoingHidesNext(PAUSED_STALLED, MAIN_CHAT)).toBe(false);
-    expect(keepGoingHidesNext(AUTOPILOT_TURN, OTHER_CHAT)).toBe(false);
+    expect(keepGoingHidesNext(LIVE_TURN, OTHER_CHAT)).toBe(false);
   });
 });
 

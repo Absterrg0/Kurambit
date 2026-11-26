@@ -363,6 +363,7 @@ import { useGameNext } from "./game/GameNextBanner";
 import { useGameDecide } from "./game/GameDecisions";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useKeepGoing } from "./game/useKeepGoing";
+import { runPick } from "./game/keepGoing.logic";
 import { useGameLatestNext } from "./game/useGameLatestNext";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -3203,7 +3204,7 @@ export default function ChatView(props: ChatViewProps) {
   })();
   const keepGoingBanner = useKeepGoingBanner(
     isGameThread && isServerThread ? activeThreadRef : null,
-    askAgentToFixStable,
+    activeLatestRun?.requestedAt ?? null,
   );
   // After an Undo the latest reply describes a build no longer on the Stage: its Next goes too.
   const latestTurnUndone = useLatestTurnUndone(
@@ -5123,17 +5124,23 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const toggleKeepFullHistory = () => setKeepFullHistory(routeThreadKey, !keepFullHistory);
-  // Set to Keep going in the run picker, Send starts it, or gives the run live here its next step.
+  // Set to Keep going in the run picker, Send starts it with the message as its direction, or
+  // adds the message to the direction of the run on here. The picker follows the run unless the
+  // person picked Once, so after a restart Send still steers the run the banner shows.
   const keepGoing = useKeepGoing(isGameThread && isServerThread ? activeThreadRef : null);
-  const keepGoingProfile = useGameWorkspaceStore((state) =>
+  const keepGoingPicked = useGameWorkspaceStore((state) =>
     isGameThread ? state.keepGoingPick[routeThreadKey] : undefined,
   );
+  const keepGoingOn =
+    keepGoing.status !== null &&
+    keepGoing.status.mode !== "off" &&
+    keepGoing.status.chat === activeThreadId;
   const keepGoingSend =
-    keepGoingProfile === undefined || !isServerThread
+    !isGameThread ||
+    !isServerThread ||
+    runPick(keepGoingPicked, keepGoing.status, activeThreadId ?? "") === "once"
       ? null
-      : keepGoing.status !== null &&
-          keepGoing.status.mode !== "off" &&
-          keepGoing.status.chat === activeThreadId
+      : keepGoingOn
         ? ("steer" as const)
         : ("start" as const);
   const toggleKeepFullHistoryStable = useStableCallback(toggleKeepFullHistory);
@@ -5897,7 +5904,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     // Keep going's message is only its direction: it may be empty, and it is no turn of its own.
-    if (keepGoingSend !== null && keepGoingProfile !== undefined && !directAnnotation) {
+    if (keepGoingSend !== null && !directAnnotation) {
       if (composerHasNonPromptContent) {
         toastManager.add(
           stackedThreadToast({
@@ -5908,7 +5915,7 @@ export default function ChatView(props: ChatViewProps) {
         );
         return;
       }
-      if (!(await keepGoing.choose(keepGoingProfile, promptRef.current))) return;
+      if (!(await keepGoing.choose("on", promptRef.current))) return;
       promptRef.current = "";
       setComposerDraftPrompt(composerDraftTarget, "");
       composerRef.current?.resetCursorState();

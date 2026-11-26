@@ -38,18 +38,13 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
       ? NO_PERMISSION
       : gameEnvironment.keepGoing.permissionAtom(threadRef.environmentId),
   );
-  const canDecide = useAtomValue(
-    threadRef === null
-      ? NO_PERMISSION
-      : gameEnvironment.keepGoingDecide.permissionAtom(threadRef.environmentId),
-  );
   const setCommand = useAtomCommand(gameEnvironment.keepGoing, { reportFailure: false });
-  const decideCommand = useAtomCommand(gameEnvironment.keepGoingDecide, { reportFailure: false });
   const chosenBudget = useAtomValue(threadRef === null ? NO_BUDGET : keepGoingBudget(threadRef));
   const [sending, setSending] = useState(false);
 
   // A run that ends (Stop, its budget, nothing left to do) puts Send back to once: the picker left
-  // on Keep going made the person's next message resume the run they had just stopped.
+  // on Keep going made the person's next message resume the run they had just stopped. Clearing
+  // the pick lets the picker follow the run again.
   const mode = query.data?.mode;
   const threadKey = threadRef === null ? null : scopedThreadKey(threadRef);
   const seen = useRef<{ readonly key: string | null; readonly on: boolean }>({
@@ -59,7 +54,7 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
   useEffect(() => {
     const on = mode !== undefined && mode !== "off";
     if (seen.current.key === threadKey && seen.current.on && mode === "off" && threadKey !== null)
-      useGameWorkspaceStore.getState().pickRun(threadKey, { kind: "once" });
+      useGameWorkspaceStore.getState().pickRun(threadKey, null);
     seen.current = { key: threadKey, on };
   }, [mode, threadKey]);
 
@@ -83,8 +78,9 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
   };
 
   /**
-   * A mode from the composer or the palette: the picked budget goes with a start or resume, and
-   * `note`, the person's message, is its next step, also when the run is already on here.
+   * On or off from the composer or the palette: the picked budget goes with a start or resume,
+   * and `note`, the person's message, is its direction: it starts or resumes the run with it, or
+   * is added to the run already on here.
    */
   const choose = async (mode: GameKeepGoingMode, note = ""): Promise<boolean> => {
     if (threadRef === null) return false;
@@ -94,23 +90,10 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
     return set({ ...(request ?? { mode }), ...(text.length === 0 ? {} : { note: text }) });
   };
 
-  const decide = async (stepId: string, answer: "start" | "skip" | "hold") => {
-    if (threadRef === null || sending) return;
-    setSending(true);
-    const result = await decideCommand({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, commandId: randomUUID(), stepId, answer },
-    });
-    setSending(false);
-    if (result._tag === "Failure")
-      reportFailure("Keep going did not take that answer", squashAtomCommandFailure(result));
-  };
-
   return {
     status: query.data,
     error: query.error,
     canOperate,
-    canDecide,
     sending,
     chosenBudget,
     setBudget: (minutes: number | null) => {
@@ -118,6 +101,5 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
     },
     set,
     choose,
-    decide,
   };
 }

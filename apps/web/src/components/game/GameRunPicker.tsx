@@ -1,4 +1,4 @@
-import type { GameRunProfile, ScopedThreadRef } from "@kurambit/contracts";
+import type { ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { ArrowRightIcon, FastForwardIcon } from "lucide-react";
 import { useRef } from "react";
@@ -27,16 +27,10 @@ import {
   budgetFromValue,
   budgetValue,
   keepGoingControlView,
+  runPick,
 } from "./keepGoing.logic";
 import { useGameArrivals } from "./useGameArrivals";
 import { useKeepGoing } from "./useKeepGoing";
-
-const PROFILES: ReadonlyArray<{ readonly profile: GameRunProfile; readonly label: string }> = [
-  { profile: "guided", label: "Guided" },
-  { profile: "autopilot", label: "Autopilot" },
-];
-const isProfile = (value: unknown): value is GameRunProfile =>
-  PROFILES.some((entry) => entry.profile === value);
 
 /** A choice's row: its name, and the check on the chosen one (its fill alone matches hover). */
 function Choice({ children }: { children: string }) {
@@ -50,8 +44,10 @@ function Choice({ children }: { children: string }) {
 
 /**
  * What a game chat's Send does: one turn, or Keep going, whose own steps follow and whose
- * direction the message is. Its label is the choice. Until Keep going arrives (a build that
- * starts, with a `Next:` line), Send sends once and there is nothing to pick: the picker is absent.
+ * direction the message is. Its label is the choice; while keep going is on in the chat it reads
+ * Keep going unless the person picked Once. The budget is in the same menu from its first open.
+ * Until Keep going arrives (a build that starts, with a `Next:` line), Send sends once and there
+ * is nothing to pick: the picker is absent.
  */
 export function GameRunPicker({
   threadRef,
@@ -63,7 +59,7 @@ export function GameRunPicker({
 }) {
   const threadKey = threadRef === null ? null : scopedThreadKey(threadRef);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const keepGoingProfile = useGameWorkspaceStore((state) =>
+  const picked = useGameWorkspaceStore((state) =>
     threadKey === null ? undefined : state.keepGoingPick[threadKey],
   );
   const pickRun = useGameWorkspaceStore((state) => state.pickRun);
@@ -76,7 +72,7 @@ export function GameRunPicker({
     sending: keepGoing.sending,
     chosenBudget: keepGoing.chosenBudget,
   });
-  const pick = keepGoingProfile !== undefined ? "keep-going" : "once";
+  const pick = runPick(picked, keepGoing.status, threadRef?.threadId ?? "");
   const arrivals = useGameArrivals(threadRef);
   const keepGoingShown = arrivals.keepGoing.shown || pick === "keep-going";
   if (!keepGoingShown) return null;
@@ -119,13 +115,8 @@ export function GameRunPicker({
         <MenuRadioGroup
           value={pick}
           onValueChange={(value) => {
-            if (threadKey === null) return;
-            if (value === "once") pickRun(threadKey, { kind: "once" });
-            else if (value === "keep-going")
-              pickRun(threadKey, {
-                kind: "keep-going",
-                profile: view.pressed && isProfile(view.value) ? view.value : "guided",
-              });
+            if (threadKey !== null && (value === "once" || value === "keep-going"))
+              pickRun(threadKey, value);
           }}
         >
           <MenuRadioItem value="once">
@@ -141,49 +132,26 @@ export function GameRunPicker({
             </MenuRadioItem>
           ) : null}
         </MenuRadioGroup>
-        {pick === "keep-going" && threadKey !== null ? (
-          <>
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuGroupLabel>Keep going</MenuGroupLabel>
-              <MenuRadioGroup
-                value={keepGoingProfile}
-                onValueChange={(value) => {
-                  if (!isProfile(value)) return;
-                  pickRun(threadKey, { kind: "keep-going", profile: value });
-                  // Live here, the run switches now; otherwise Send starts it in this mode.
-                  if (view.pressed) void keepGoing.choose(value);
-                }}
+        <MenuSeparator />
+        <MenuGroup>
+          <MenuGroupLabel>{view.budgetLabel}</MenuGroupLabel>
+          <MenuRadioGroup
+            value={budgetValue(view.budget)}
+            onValueChange={(value) => {
+              if (typeof value === "string") keepGoing.setBudget(budgetFromValue(value));
+            }}
+          >
+            {KEEP_GOING_BUDGETS.map((option) => (
+              <MenuRadioItem
+                key={budgetValue(option.minutes)}
+                value={budgetValue(option.minutes)}
+                disabled={threadKey === null || view.budgetDisabled}
               >
-                {PROFILES.map((entry) => (
-                  <MenuRadioItem key={entry.profile} value={entry.profile}>
-                    <Choice>{entry.label}</Choice>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuGroupLabel>{view.budgetLabel}</MenuGroupLabel>
-              <MenuRadioGroup
-                value={budgetValue(view.budget)}
-                onValueChange={(value) => {
-                  if (typeof value === "string") keepGoing.setBudget(budgetFromValue(value));
-                }}
-              >
-                {KEEP_GOING_BUDGETS.map((option) => (
-                  <MenuRadioItem
-                    key={budgetValue(option.minutes)}
-                    value={budgetValue(option.minutes)}
-                    disabled={view.budgetDisabled}
-                  >
-                    <Choice>{option.label}</Choice>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </>
-        ) : null}
+                <Choice>{option.label}</Choice>
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
       </MenuPopup>
     </Menu>
   );

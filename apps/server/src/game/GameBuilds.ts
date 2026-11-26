@@ -1328,7 +1328,7 @@ const make = Effect.gen(function* () {
           ),
         );
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
-      // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
+      // Undo, Redo or Go back moved the folder a waiting proposal read: the person goes first.
       if (result.moved === "restored")
         yield* Effect.flatMap(projectStep(projections, g.projectId), (located) =>
           located === null ? Effect.void : supersedeProposal(engine, located),

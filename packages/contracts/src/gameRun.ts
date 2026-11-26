@@ -10,7 +10,6 @@ import { GameBuildId, GameFactDelta, GameStepVerdict } from "./gameBuilds.ts";
 
 // The profile and the refusal reasons live in a leaf module: game.ts names them
 // and sits under gameBuilds.ts's imports, which this module needs.
-import { GameRunProfile } from "./gameRunReasons.ts";
 export { GameRunErrorReason, GameRunProfile, GameRunRefusalReason } from "./gameRunReasons.ts";
 
 /** The caller's id for one request: a retry with the same id is the same command, applied once. */
@@ -38,7 +37,8 @@ export const GameRunEnding = Schema.Literals([
 ]);
 export type GameRunEnding = typeof GameRunEnding.Type;
 
-export const GameKeepGoingMode = Schema.Literals(["off", "guided", "autopilot"]);
+/** Keep going is on or off: on, it takes each step at once until steps stop gaining or it is stopped. */
+export const GameKeepGoingMode = Schema.Literals(["off", "on"]);
 export type GameKeepGoingMode = typeof GameKeepGoingMode.Type;
 
 /**
@@ -63,7 +63,11 @@ export const GameKeepGoingInput = Schema.Struct({
   mode: GameKeepGoingMode,
   /** For a start or resume; null is no limit; omitted keeps the run's own (a new run: 60). */
   budgetMinutes: Schema.optionalKey(Schema.NullOr(PositiveInt)),
-  /** The person's words for the next step, sent with the start: its direction. */
+  /**
+   * The person's words, sent with the start: its direction, kept until a step says it is done.
+   * Given on a start or resume it replaces the direction left from before; while the run is on
+   * here it is added to it.
+   */
   note: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
 });
 export type GameKeepGoingInput = typeof GameKeepGoingInput.Type;
@@ -76,10 +80,6 @@ export const GameKeepGoingPhase = Schema.Literals([
   "waiting",
   /** look: reading the current build's facts. */
   "looking",
-  /** Guided: a proposal with a deadline. */
-  "proposed",
-  /** Guided: a proposal the person is editing (no deadline). */
-  "held",
   /** The step's turn is running. */
   "turn",
   /** judge */
@@ -114,32 +114,25 @@ export const GameKeepGoingStatus = Schema.Struct({
   chat: Schema.NullOr(ThreadId),
   /** "off" unless a run is live. */
   mode: GameKeepGoingMode,
-  /** The run's last mode, kept while paused or ended (a resume sends it); null when the game never ran keep going. */
-  profile: Schema.NullOr(GameRunProfile),
   phase: Schema.NullOr(GameKeepGoingPhase),
   step: Schema.NullOr(PositiveInt),
-  proposal: Schema.NullOr(
-    Schema.Struct({
-      stepId: Schema.String,
-      why: GameRunStepWhy,
-      /** One line for the person, from the step's why and target. */
-      summary: Schema.String,
-      /** The agent's full prompt, shown on Edit. */
-      text: Schema.String,
-      /** Null while held. */
-      deadline: Schema.NullOr(IsoDateTime),
-    }),
-  ),
   budgetMinutes: Schema.NullOr(PositiveInt),
-  endsAt: Schema.NullOr(IsoDateTime),
+  /**
+   * Minutes of the budget left; null without one. The budget counts only the steps' own turns,
+   * so time between steps and time the app was off never spend it.
+   */
+  budgetLeftMinutes: Schema.NullOr(NonNegativeInt),
   /** Newest first, at most 10: every push resends it. */
   steps: Schema.Array(GameKeepGoingStepRef).check(Schema.isMaxLength(10)),
   /** The run's first step's number, so its reel shows the whole run; null before it took one. */
   firstStep: Schema.NullOr(PositiveInt),
+  /** The person's direction: each entry stays until a step that carried it says it is done. */
   steer: Schema.Array(Schema.String),
   setAside: Schema.Array(Schema.Struct({ text: Schema.String, why: Schema.String })),
   /** Why it last stopped; null while live or never run. */
   ending: Schema.NullOr(GameRunEnding),
+  /** When it last stopped; null while live or never run. A turn in its chat since retires the line saying why. */
+  endedAt: Schema.NullOr(IsoDateTime),
   resumable: Schema.Boolean,
   /** Why keep going cannot run on this game or chat ("Keep going needs an engine…", "Keep going is on in <chat>"); null when it can. */
   blocked: Schema.NullOr(Schema.String),
@@ -147,16 +140,6 @@ export const GameKeepGoingStatus = Schema.Struct({
   message: Schema.String,
 });
 export type GameKeepGoingStatus = typeof GameKeepGoingStatus.Type;
-
-export const GameKeepGoingDecideInput = Schema.Struct({
-  threadId: ThreadId,
-  commandId: GameRunCommandKey,
-  stepId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
-  answer: Schema.Literals(["start", "skip", "hold"]),
-});
-export type GameKeepGoingDecideInput = typeof GameKeepGoingDecideInput.Type;
-export const GameKeepGoingDecideResult = Schema.Struct({ message: Schema.String });
-export type GameKeepGoingDecideResult = typeof GameKeepGoingDecideResult.Type;
 
 export const GameKeepGoingSteerInput = Schema.Struct({
   threadId: ThreadId,

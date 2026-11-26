@@ -19,6 +19,7 @@ import {
   type MessageId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
+  type OrchestrationV2TurnItem,
   type ProjectId,
   type RunId,
   type ThreadId,
@@ -35,7 +36,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
-import { replyHeadline } from "../../orchestration-v2/gameRun/decide.ts";
+import { directionDone, replyHeadline } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   type StepTurn,
@@ -103,6 +104,75 @@ export const stepChain = (
     chain.push(continued);
     next = continued;
   }
+};
+
+/**
+ * Kurambit's own tools, whose waits are not the agent's time: a check that waits its turn in the
+ * measuring queue and plays the game in software, and Blender rendering or exporting.
+ */
+const HARNESS_WAITS = ["game_check", "game_blender"];
+
+type TimedItem = Pick<
+  OrchestrationV2TurnItem,
+  "runId" | "type" | "status" | "startedAt" | "completedAt"
+> & { readonly toolName?: string | null };
+
+/** PURE. The length of the union of [start, end] spans. */
+const covered = (spans: ReadonlyArray<readonly [number, number]>): number => {
+  let total = 0;
+  let reach = Number.NEGATIVE_INFINITY;
+  for (const [from, to] of spans.toSorted((a, b) => a[0] - b[0])) {
+    const start = Math.max(from, reach);
+    if (to > start) total += to - start;
+    reach = Math.max(reach, to);
+  }
+  return total;
+};
+
+/**
+ * PURE. A step turn's time so far, through its restart continuations: `live` is its runs' own
+ * time, so the time the app was off between them never counts, and `own` is the agent's, without
+ * its waits on Kurambit's tools. A run a restart cut off ends at its last activity: T3 marks it
+ * cancelled only once the app is back.
+ */
+export const stepTurnTime = (
+  chain: ReadonlyArray<OrchestrationV2Run>,
+  items: ReadonlyArray<TimedItem>,
+  now: number,
+): { readonly live: number; readonly own: number } => {
+  let live = 0;
+  let waits = 0;
+  for (const run of chain) {
+    const start = millis(run.startedAt);
+    if (start === null) continue;
+    const mine = items.filter((item) => item.runId === run.id);
+    const end =
+      run.status === "cancelled"
+        ? Math.max(
+            start,
+            ...mine.flatMap((item) => [
+              millis(item.startedAt) ?? start,
+              item.status === "cancelled" ? start : (millis(item.completedAt) ?? start),
+            ]),
+          )
+        : (millis(run.completedAt) ?? now);
+    live += Math.max(0, end - start);
+    waits += covered(
+      mine.flatMap((item): ReadonlyArray<readonly [number, number]> => {
+        const from = millis(item.startedAt);
+        const name = item.toolName ?? "";
+        if (
+          item.type !== "dynamic_tool" ||
+          from === null ||
+          !HARNESS_WAITS.some((tool) => name.endsWith(tool))
+        )
+          return [];
+        const to = item.status === "cancelled" ? end : (millis(item.completedAt) ?? end);
+        return [[Math.max(start, from), Math.min(end, to)]];
+      }),
+    );
+  }
+  return { live, own: Math.max(0, live - waits) };
 };
 
 /** What the step's turn asks of keep going now. */
@@ -347,15 +417,27 @@ const make = Effect.gen(function* () {
       },
     );
 
-  /** What the step did, from the last reply of its turn; empty without one. */
-  const didOf = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
+  /** The last reply of its turn: what the step did, and whether it says the direction is done. */
+  const replyOf = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
     Effect.map(
       threads.getThreadRecords(threadId, ["messages"], {
         messageRoles: ["assistant"],
         messageRunIds: chain.map((run) => run.id),
       }),
-      (records) => replyHeadline(records.messages.at(-1)?.text ?? ""),
+      (records) => {
+        const reply = records.messages.at(-1)?.text ?? "";
+        return { did: replyHeadline(reply), done: directionDone(reply) };
+      },
     );
+
+  /** The step turn's time (stepTurnTime), from its runs' items. */
+  const timeOf = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
+    Effect.gen(function* () {
+      const { turnItems } = yield* threads.getThreadRecords(threadId, ["turnItems"], {
+        turnItemRunIds: chain.map((run) => run.id),
+      });
+      return stepTurnTime(chain, turnItems, DateTime.toEpochMillis(yield* DateTime.now));
+    });
 
   const land = (
     located: Located,
@@ -401,9 +483,6 @@ const make = Effect.gen(function* () {
         outcome === "superseded" || latest.status === "failed"
           ? null
           : yield* builds.turnBuild(threadId, latest.id, turn.base);
-      const first = chain[0] ?? latest;
-      const from = millis(first.startedAt) ?? DateTime.toEpochMillis(first.requestedAt);
-      const to = millis(latest.completedAt) ?? DateTime.toEpochMillis(yield* DateTime.now);
       const reason =
         outcome === "capped"
           ? `stopped at its ${Math.round(turn.capMs / 60_000)}-minute cap`
@@ -418,6 +497,9 @@ const make = Effect.gen(function* () {
                 : latest.status === "failed"
                   ? failed
                   : "";
+      // A turn cut off mid-work ends on a progress line, not on what it did.
+      const reply =
+        outcome === "completed" ? yield* replyOf(threadId, chain) : { did: "", done: false };
       yield* complete(located, {
         kind: "turn",
         runId: latest.id,
@@ -426,11 +508,11 @@ const make = Effect.gen(function* () {
         startBuild: kept?.startBuild ?? null,
         files: kept?.files ?? 0,
         tokens: yield* tokensOf(threadId, chain),
-        elapsedMs: Math.max(0, to - from),
+        elapsedMs: (yield* timeOf(threadId, chain)).live,
         personSteered: yield* steeredBy(threadId, chain),
         reason,
-        // A turn cut off mid-work ends on a progress line, not on what it did.
-        did: outcome === "completed" ? yield* didOf(threadId, chain) : "",
+        did: reply.did,
+        ...(reply.done ? { done: true } : {}),
       });
     });
 

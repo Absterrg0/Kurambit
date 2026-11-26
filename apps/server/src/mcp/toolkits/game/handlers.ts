@@ -660,7 +660,9 @@ const handlers = {
       const threadId = scope.thread.threadId;
       const runs = yield* GameRunControl.GameRunControl;
       return yield* Effect.gen(function* () {
-        if (input.steer !== undefined)
+        // Turning it on, the person's words are its direction; otherwise they are added to it.
+        const direction = input.mode === "on" ? input.steer : undefined;
+        if (input.steer !== undefined && direction === undefined)
           yield* runs.steer(threadId, {
             threadId,
             text: input.steer,
@@ -672,6 +674,7 @@ const handlers = {
           mode: input.mode,
           ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
           ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+          ...(direction === undefined ? {} : { note: direction }),
         });
       }).pipe(
         Effect.mapError((cause) =>

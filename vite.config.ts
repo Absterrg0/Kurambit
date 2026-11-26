@@ -378,7 +378,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/components/game/useKeepGoingBanner.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 3 }] },
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 2 }] },
       },
       {
         // Every web file must compile under the React Compiler. Its bailout rules are errors here,

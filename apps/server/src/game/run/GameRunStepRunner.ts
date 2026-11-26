@@ -66,6 +66,13 @@ import { retrying } from "./retrying.ts";
  * takes minutes, and it can start only once the build before it has booted.
  */
 const FACTS_WAIT = "15 minutes";
+/**
+ * A step turn is stopped at this many times its cap of its own runs' time, however much of it
+ * went to Kurambit's tools: a tool that never answers must not hold a step forever.
+ */
+const CAP_BACKSTOP = 3;
+/** The least a cap that is not due yet is set again for. */
+const CAP_RECHECK_MS = 5_000;
 /** How many of the chat's latest replies the look reads for the newest `Next:` line. */
 const NEXT_LOOKBACK = 20;
 const Critique = Schema.Struct({ major: Schema.Boolean, biggest: Schema.String });
@@ -159,7 +166,9 @@ const make = Effect.gen(function* () {
           .measure(
             threadId,
             { _tag: "build", build },
-            { waitFor: FACTS_WAIT, queue: "background", upTo: "boots" },
+            // The run waits on these facts as a person would: at background priority, every
+            // other game's older builds measured first while the step sat queued.
+            { waitFor: FACTS_WAIT, queue: "person", upTo: "boots" },
           )
           .pipe(
             Effect.map((facts): GameBuildFacts | null => facts),
@@ -298,15 +307,22 @@ const make = Effect.gen(function* () {
           ? yield* factsSoFar(threadId, made)
           : null;
       const critique = yield* referenceCritique(threadId);
-      // The person's picture says what to change while it still differs; fresh eyes go after it.
+      const next = yield* nextLine(threadId);
+      // Fresh eyes only when nothing else says what to do: the person's picture while it still
+      // differs, their direction, and the agent's own `Next:` all go first, and a model call no
+      // step would take is tokens spent on nothing.
       const fresh =
-        critique !== null && critique !== "none" ? undefined : yield* freshLook(threadId, root);
+        (critique !== null && critique !== "none") ||
+        located.run.steer.length > 0 ||
+        (next !== null && next !== "none")
+          ? undefined
+          : yield* freshLook(threadId, root);
       yield* complete(located, {
         kind: "look",
         current: build,
         facts,
         ...(earlier === null ? {} : { earlier }),
-        next: yield* nextLine(threadId),
+        next,
         critique,
         ...(fresh === undefined ? {} : { fresh }),
         edited,
@@ -364,6 +380,7 @@ const make = Effect.gen(function* () {
             ),
             lastReply: (yield* repliesOf(threadId))[0] ?? null,
             facts: yield* factsSoFar(threadId, step.base),
+            direction: step.steer,
           },
           step.capMs,
         );
@@ -489,9 +506,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * A step turn's cap, due at the turn's start plus its cap (the decider set
-   * it at step.start). One that fires early (a restart re-ran it) is set
-   * again for the time left; inside its effect, so a death in between runs it again.
+   * A step turn's cap, on the agent's own time: its runs' time without the time the app was off
+   * between them or its waits on game_check and game_blender (stepTurnTime). The decider sets it
+   * at step.start for the whole cap; one that finds less of the agent's time spent is set again
+   * for what is left, inside its effect, so a death in between runs it again.
    */
   const deadline = (job: GameRunJobs.GameRunStepJob & GameRunJobs.GameRunEffectTry) =>
     Effect.gen(function* () {
@@ -501,11 +519,15 @@ const make = Effect.gen(function* () {
       const { runs } = yield* threads.getThreadRecords(job.threadId, ["runs"]);
       const chain = GameRunTurnReactor.stepChain(runs, stepTurnMessageId(job.stepId, job.attempt));
       const live = chain.at(-1);
-      const first = chain[0];
-      if (live === undefined || first === undefined) return;
+      if (live === undefined) return;
       if (!["preparing", "queued", "starting", "running"].includes(live.status)) return;
-      const due = DateTime.toEpochMillis(first.startedAt ?? first.requestedAt) + capMs;
-      if (DateTime.toEpochMillis(yield* DateTime.now) < due)
+      const now = DateTime.toEpochMillis(yield* DateTime.now);
+      const { turnItems } = yield* threads.getThreadRecords(job.threadId, ["turnItems"], {
+        turnItemRunIds: chain.map((run) => run.id),
+      });
+      const spent = GameRunTurnReactor.stepTurnTime(chain, turnItems, now);
+      if (spent.own < capMs && spent.live < capMs * CAP_BACKSTOP) {
+        const due = now + Math.max(CAP_RECHECK_MS, capMs - spent.own);
         return yield* GameRunTurnReactor.refusedOnly(
           engine.dispatch({
             type: "game-run.step.schedule",
@@ -520,6 +542,7 @@ const make = Effect.gen(function* () {
             timer: { kind: "cap" },
           }),
         );
+      }
       yield* GameRunTurnReactor.refusedOnly(
         engine.dispatch({
           type: "run.interrupt",

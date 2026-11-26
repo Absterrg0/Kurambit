@@ -627,10 +627,6 @@ export const gameEnvironment = {
     label: "game:keepGoing",
     tag: WS_METHODS.gameKeepGoing,
   }),
-  keepGoingDecide: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:keepGoingDecide",
-    tag: WS_METHODS.gameKeepGoingDecide,
-  }),
   saveMedia: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:saveMedia",
     tag: WS_METHODS.gameMediaSave,

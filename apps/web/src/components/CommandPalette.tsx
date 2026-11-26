@@ -140,7 +140,6 @@ import {
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
-  SkipForwardIcon,
   SquarePenIcon,
   SwatchBookIcon,
   StepForwardIcon,
@@ -2039,8 +2038,8 @@ function OpenCommandPaletteDialog(props: {
           },
         ],
       });
-    // Keep going: on, off and resume, and the Guided proposal's answers. A
-    // pause's reason rides on the items that resume it.
+    // Keep going: on (a resume of a paused run) and off. A pause's reason rides on the item that
+    // resumes it.
     const keepGoingStatus = keepGoing.status;
     if (keepGoingStatus !== null) {
       const control = keepGoingControlView({
@@ -2055,27 +2054,20 @@ function OpenCommandPaletteDialog(props: {
         keepGoingStatus.mode === "off" && keepGoingStatus.ending !== null
           ? keepGoingStatus.message
           : undefined;
-      if (control.disabled === null && control.modesDisabled === null)
-        for (const [mode, title] of [
-          ["guided", "Keep going: Guided"],
-          ["autopilot", "Keep going: Autopilot"],
-        ] as const)
-          if (!(control.pressed && control.value === mode))
-            actionItems.push({
-              kind: "action",
-              value: `action:game-keep-going-${mode}`,
-              title,
-              ...(paused === undefined ? {} : { description: paused }),
-              searchTerms: ["keep going", mode, "resume", "continue", "autonomous", "game"],
-              icon: <FastForwardIcon className={ITEM_ICON_CLASS} />,
-              // The composer's run picker says Keep going from now on, so Send steers it.
-              run: async () => {
-                useGameWorkspaceStore
-                  .getState()
-                  .pickRun(scopedThreadKey(threadRef), { kind: "keep-going", profile: mode });
-                await keepGoing.choose(mode);
-              },
-            });
+      if (control.disabled === null && control.modesDisabled === null && !control.pressed)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-keep-going",
+          title: keepGoingStatus.resumable ? "Resume Keep going" : "Keep going",
+          ...(paused === undefined ? {} : { description: paused }),
+          searchTerms: ["keep going", "resume", "continue", "autonomous", "autopilot", "game"],
+          icon: <FastForwardIcon className={ITEM_ICON_CLASS} />,
+          // The composer's run picker says Keep going from now on, so Send steers it.
+          run: async () => {
+            useGameWorkspaceStore.getState().pickRun(scopedThreadKey(threadRef), "keep-going");
+            await keepGoing.choose("on");
+          },
+        });
       if (keepGoingStatus.mode !== "off" && keepGoing.canOperate)
         actionItems.push({
           kind: "action",
@@ -2088,26 +2080,6 @@ function OpenCommandPaletteDialog(props: {
             await keepGoing.set({ mode: "off" });
           },
         });
-      const proposal = keepGoingStatus.proposal;
-      if (proposal !== null && keepGoingStatus.chat === threadRef.threadId && keepGoing.canDecide) {
-        actionItems.push({
-          kind: "action",
-          value: "action:game-keep-going-start",
-          title: "Start the proposed step now",
-          description: proposal.text.split("\n")[0] ?? proposal.text,
-          searchTerms: ["keep going", "start", "proposed", "step", "now", "game"],
-          icon: <StepForwardIcon className={ITEM_ICON_CLASS} />,
-          run: () => keepGoing.decide(proposal.stepId, "start"),
-        });
-        actionItems.push({
-          kind: "action",
-          value: "action:game-keep-going-skip",
-          title: "Skip the proposed step",
-          searchTerms: ["keep going", "skip", "proposed", "step", "game"],
-          icon: <SkipForwardIcon className={ITEM_ICON_CLASS} />,
-          run: () => keepGoing.decide(proposal.stepId, "skip"),
-        });
-      }
     }
     if (canGameAction && gameEngine !== null)
       actionItems.push({

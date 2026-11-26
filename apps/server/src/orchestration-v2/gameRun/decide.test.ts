@@ -1,5 +1,5 @@
-// The keep-going cycle through the decider: a run looks, proposes, takes its
-// turn, judges, undoes and records, and every report is checked against the
+// The keep-going cycle through the decider: a run looks, takes its turn,
+// judges, undoes and records, and every report is checked against the
 // step in flight so a late or repeated one changes nothing.
 import { describe, expect, it } from "@effect/vitest";
 import {
@@ -142,15 +142,45 @@ class Store {
       result,
     });
   }
-  start(profile: "guided" | "autopilot", budgetMinutes: number | null = null) {
+  start(budgetMinutes: number | null = null) {
     return this.ok({
       type: "game-run.start",
       runId: GameRunId.make("run_turns"),
       engine: "three",
       lane: "web",
-      profile,
       budgetMinutes,
     });
+  }
+  /** A proposal an earlier Kurambit's Guided mode left in flight, as its records hold it. */
+  legacyProposal() {
+    const run = this.run;
+    const seq = run.seq + 1;
+    const id = gameRunStepId(run.id, seq);
+    const at = DateTime.formatIso(DateTime.makeUnsafe(this.now));
+    this.steps.set(id, {
+      id,
+      runId: run.id,
+      threadId: chat,
+      seq,
+      attempt: 1,
+      kind: "propose",
+      step: {
+        kind: "propose",
+        id: seq,
+        proposal: { why: "next", text: "Add a boss.", target: null, key: "next:boss" },
+        deadline: null,
+      },
+      status: "planned",
+      result: null,
+      logs: [],
+      plannedAt: at,
+      startedAt: null,
+      completedAt: null,
+    });
+    this.runs = this.runs.map((r) =>
+      r.id === run.id ? { ...r, status: "waiting", seq, inFlight: seq, profile: "guided" } : r,
+    );
+    return id;
   }
 }
 
@@ -189,7 +219,7 @@ describe("a keep-going run", () => {
   // turn ends, so it must be on the step itself, not in a process's memory.
   it("records the model choice a step's turn started under on the step", () => {
     const store = new Store();
-    store.start("autopilot", 60);
+    store.start(60);
     store.complete(look());
     const turnStep = store.step();
     store.ok({
@@ -207,22 +237,14 @@ describe("a keep-going run", () => {
 
   it("goes look, turn, judge, undo, record, and proposes the retry next", () => {
     const store = new Store();
-    store.start("autopilot", 60);
-    expect(store.run).toMatchObject({
-      status: "running",
-      budgetEndsAt: T0 + 3_600_000,
-    });
+    store.start(60);
+    expect(store.run).toMatchObject({ status: "running", budgetMinutes: 60, budgetUsedMs: 0 });
     expect(store.step().step.kind).toBe("look");
     expect(store.effects.map((e) => e.request.type)).toEqual(["game-run.step.execute"]);
 
     store.complete(look());
     const turnStep = store.step();
-    expect(turnStep.step).toMatchObject({
-      kind: "turn",
-      base: BASE,
-      startedBy: "autopilot",
-      capMs: 15 * 60_000,
-    });
+    expect(turnStep.step).toMatchObject({ kind: "turn", base: BASE, capMs: 15 * 60_000 });
     store.ok({ type: "game-run.step.start", runId: store.run.id, stepId: turnStep.id, attempt: 1 });
     expect(store.effects).toEqual([
       expect.objectContaining({
@@ -234,6 +256,8 @@ describe("a keep-going run", () => {
     store.now += 180_000;
     store.complete(turn());
     expect(store.step().step).toEqual({ kind: "judge", id: 3, build: BUILD, base: BASE });
+    // Only the turn's own working time spends the budget, not the wall clock since the start.
+    expect(store.run.budgetUsedMs).toBe(120_000);
 
     store.complete({ kind: "judge", base: facts(), build: { ...crashes, build: BUILD } });
     expect(store.step().step).toEqual({ kind: "undo", id: 4, target: BASE, expect: BUILD });
@@ -270,7 +294,7 @@ describe("a keep-going run", () => {
 
   it("refuses a late or repeated report: it changes nothing", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     const lookStep = store.step();
     store.complete(look());
     const again = store.send({
@@ -296,9 +320,9 @@ describe("a keep-going run", () => {
     ).toBe("wrong-kind");
   });
 
-  it("keeps the turn's notes until it starts, and gives them back when Off stops it", () => {
+  it("keeps the person's direction until a step says it is done, and through Off", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.ok({ type: "game-run.steer", runId: store.run.id, note: "Make it night." });
     store.complete(look());
     expect(store.step().step).toMatchObject({
@@ -313,94 +337,76 @@ describe("a keep-going run", () => {
       stepId: store.step().id,
       attempt: 1,
     });
-    expect(store.run.steer).toEqual(["And rain."]);
+    // Nothing is taken off the run as the step starts.
+    expect(store.run.steer).toEqual(["Make it night.", "And rain."]);
+    // A step that does not say it is done leaves the direction for the next one.
+    store.complete(turn());
+    store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
+    expect(store.run.steer).toEqual(["Make it night.", "And rain."]);
+    store.complete(look());
+    expect(store.step().step).toMatchObject({
+      proposal: { why: "steer" },
+      steer: ["Make it night.", "And rain."],
+    });
     store.ok({ type: "game-run.stop", runId: store.run.id });
     expect(store.run).toMatchObject({
       status: "ended",
       ending: "stopped",
       steer: ["Make it night.", "And rain."],
     });
+    // Turned on again with words of their own, those are its direction.
+    store.ok({ type: "game-run.resume", runId: store.run.id, direction: "Add fog instead." });
+    expect(store.run.steer).toEqual(["Add fog instead."]);
   });
 
-  it("Guided: the default starts at its deadline, hold clears it, Skip sets the step aside", () => {
+  it("retires the direction a step carried once its reply says it is done, unless undone", () => {
     const store = new Store();
-    store.start("guided");
+    store.start();
+    store.ok({ type: "game-run.steer", runId: store.run.id, note: "Make it night." });
     store.complete(look());
-    const proposal = store.step();
-    expect(proposal.step).toMatchObject({ kind: "propose", deadline: T0 + 60_000 });
-    expect(store.run.status).toBe("waiting");
-    expect(store.effects).toEqual([
-      expect.objectContaining({
-        request: expect.objectContaining({
-          type: "game-run.decision.deadline",
-          decisionId: proposal.id,
-        }),
-        availableAt: T0 + 60_000,
-      }),
-    ]);
-    const expire = () =>
-      store.send({
-        type: "game-run.decision.expire",
-        runId: store.run.id,
-        decisionId: proposal.id,
-      });
-    expect(refusal(expire())).toBe("not-due");
-    store.ok({
-      type: "game-run.decide",
-      runId: store.run.id,
-      decisionId: proposal.id,
-      answer: "hold",
-    });
-    store.now += 120_000;
-    expect(refusal(expire())).toBe("not-due");
-    store.ok({
-      type: "game-run.decide",
-      runId: store.run.id,
-      decisionId: proposal.id,
-      answer: "skip",
-    });
-    expect(store.run.setAside).toEqual([
-      { key: expect.stringMatching(/^next:/), text: "Add a score counter.", why: "you skipped it" },
-    ]);
-    expect(store.step().step.kind).toBe("look");
+    store.ok({ type: "game-run.steer", runId: store.run.id, note: "And rain." });
+    store.complete(turn({ done: true }));
+    store.complete({ kind: "judge", base: facts(), build: { ...crashes, build: BUILD } });
+    store.complete({ kind: "undo", restored: true, why: "restored", message: "" });
+    expect(store.run.steer).toEqual(["Make it night.", "And rain."]);
+    store.complete(look());
+    const carried = store.step().step;
+    expect(carried).toMatchObject({ steer: ["Make it night.", "And rain."] });
+    store.complete(turn({ done: true, runId: RunId.make("t3-run-2") }));
+    store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
+    expect(store.run.steer).toEqual([]);
+  });
 
-    store.complete(look({ next: { text: "Add a boss." } }));
-    const second = store.step();
-    store.now += 60_000;
-    store.ok({ type: "game-run.decision.expire", runId: store.run.id, decisionId: second.id });
-    expect(store.step().step).toMatchObject({ kind: "turn", startedBy: "default", base: BASE });
+  it("starts a proposal an earlier Kurambit's Guided mode left waiting, on no countdown", () => {
+    const store = new Store();
+    store.start();
+    const proposal = store.legacyProposal();
+    store.ok({ type: "game-run.decision.expire", runId: store.run.id, decisionId: proposal });
+    expect(store.step().step).toMatchObject({ kind: "turn", proposal: { key: "next:boss" } });
+    expect(store.run.status).toBe("running");
     expect(
       refusal(
         store.send({
-          type: "game-run.decide",
+          type: "game-run.decision.expire",
           runId: store.run.id,
-          decisionId: second.id,
-          answer: "start",
+          decisionId: proposal,
         }),
       ),
     ).toBe("no-decision");
   });
 
-  it("a turn on the game supersedes the proposal, and a note starts as the person's step", () => {
+  it("a turn on the game supersedes a waiting proposal: the run looks again", () => {
     const store = new Store();
-    store.start("guided");
-    store.complete(look());
+    store.start();
+    store.legacyProposal();
     store.complete({ kind: "decided", answer: "superseded", by: "server" });
     expect(store.step().step.kind).toBe("look");
-    store.complete(look());
-    store.ok({ type: "game-run.steer", runId: store.run.id, note: "Make the jump higher." });
-    expect(store.step().step).toMatchObject({
-      kind: "turn",
-      startedBy: "creator",
-      base: BASE,
-      proposal: { why: "steer" },
-      steer: ["Make the jump higher."],
-    });
+    expect(store.run.status).toBe("running");
   });
 
   it("a restart or pause during the judge runs that judge again, never a second turn", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     store.complete(turn());
     const judge = store.step();
@@ -450,9 +456,9 @@ describe("a keep-going run", () => {
     expect(store.step().step.kind).toBe("look");
   });
 
-  it("gives a started note back when its turn ends on a usage limit (WB2)", () => {
+  it("keeps a started step's direction when its turn ends on a usage limit (WB2)", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.ok({ type: "game-run.steer", runId: store.run.id, note: "Add a boss at wave 5." });
     store.complete(look());
     store.ok({
@@ -461,7 +467,7 @@ describe("a keep-going run", () => {
       stepId: store.step().id,
       attempt: 1,
     });
-    expect(store.run.steer).toEqual([]);
+    expect(store.run.steer).toEqual(["Add a boss at wave 5."]);
     store.complete({
       kind: "ended",
       ending: "usage-limit",
@@ -474,31 +480,9 @@ describe("a keep-going run", () => {
     });
   });
 
-  it("Redo after an auto-undo supersedes the pending retry, and nothing undoes the Redo (TW1)", () => {
+  it("a retry that starts after a Redo is superseded, never judged (TW1)", () => {
     const store = new Store();
-    store.start("guided");
-    store.complete(look());
-    store.ok({
-      type: "game-run.decide",
-      runId: store.run.id,
-      decisionId: store.step().id,
-      answer: "start",
-    });
-    store.complete(turn());
-    store.complete({ kind: "judge", base: facts(), build: { ...crashes, build: BUILD } });
-    store.complete({ kind: "undo", restored: true, why: "restored", message: "" });
-    store.complete(look());
-    expect(store.step().step).toMatchObject({ kind: "propose", proposal: { why: "regression" } });
-    // The person presses Redo: the folder move supersedes the retry, and the
-    // next look reads the redone build, so no retry is proposed and nothing undoes it.
-    store.complete({ kind: "decided", answer: "superseded", by: "server" });
-    store.complete(look({ current: BUILD }));
-    expect(store.step().step).toMatchObject({ kind: "propose", proposal: { why: "next" } });
-  });
-
-  it("an Autopilot retry that starts after a Redo is superseded, never judged (TW1)", () => {
-    const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     store.complete(turn());
     store.complete({ kind: "judge", base: facts(), build: { ...crashes, build: BUILD } });
@@ -516,7 +500,7 @@ describe("a keep-going run", () => {
 
   it("a person's turn landing during the look's facts wait is never judged as the step (TW1)", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     const PERSON = GameBuildId.make("c".repeat(40));
     store.complete(turn({ startBuild: PERSON }));
@@ -526,42 +510,30 @@ describe("a keep-going run", () => {
 
   it("stops on two steps in a row that changed nothing, and resumes afresh", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     store.complete(turn({ files: 0 }));
     store.complete(look({ next: { text: "Polish the menu." } }));
     store.complete(turn({ files: 0 }));
     expect(store.run).toMatchObject({ status: "ended", ending: "stalled", inFlight: null });
-    store.ok({ type: "game-run.resume", runId: store.run.id, profile: "guided" });
-    expect(store.run).toMatchObject({ status: "running", stallStreak: 0, profile: "guided" });
+    store.ok({ type: "game-run.resume", runId: store.run.id });
+    expect(store.run).toMatchObject({ status: "running", stallStreak: 0 });
     expect(store.step().step.kind).toBe("look");
   });
 
   it("pauses when steps keep never landing, whatever made them", () => {
     const store = new Store();
-    store.start("guided");
-    // A proposal a turn superseded, a turn the folder moved under, and one
-    // that started on another build: each looks again, and the third pauses.
-    store.complete(look());
+    store.start();
+    // A waiting proposal a turn superseded, a turn that came up behind another, and one that
+    // started on another build: each looks again, and the third pauses.
+    store.legacyProposal();
     store.complete({ kind: "decided", answer: "superseded", by: "server" });
-    expect(store.step().step).toEqual({ kind: "look", id: 3 });
+    expect(store.step().step.kind).toBe("look");
     store.complete(look());
-    store.ok({
-      type: "game-run.decide",
-      runId: store.run.id,
-      decisionId: store.step().id,
-      answer: "start",
-    });
     store.complete(turn({ outcome: "superseded", startBuild: null, build: null }));
     expect(store.step().step).toMatchObject({ kind: "look" });
     expect(store.run.supersededStreak).toBe(2);
     store.complete(look());
-    store.ok({
-      type: "game-run.decide",
-      runId: store.run.id,
-      decisionId: store.step().id,
-      answer: "start",
-    });
     store.complete(turn({ startBuild: GameBuildId.make("c".repeat(40)) }));
     expect(store.run).toMatchObject({ status: "ended", ending: "stalled", inFlight: null });
     expect(store.run.lastFailure).toMatch(/^3 steps in a row never started/);
@@ -573,7 +545,7 @@ describe("a keep-going run", () => {
 
   it("a landed step ends the streak of steps that never landed", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     for (let i = 0; i < 2; i++) {
       store.complete(look());
       store.complete(turn({ outcome: "superseded", startBuild: null, build: null }));
@@ -589,7 +561,7 @@ describe("a keep-going run", () => {
 
   it("pauses on a folder edited outside any build, before planning a step its undo could hurt", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look({ edited: true, facts: null }));
     expect(store.run).toMatchObject({ status: "ended", ending: "stalled" });
     expect(store.run.lastFailure).toContain("changes no build holds");
@@ -597,7 +569,7 @@ describe("a keep-going run", () => {
 
   it("never sends again a step that changed nothing", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     store.complete(turn({ files: 0 }));
     expect(store.run.setAside?.map((entry) => entry.why)).toEqual([
@@ -611,11 +583,22 @@ describe("a keep-going run", () => {
 
   it("tells the next step that the time cap, not the person, stopped the last one", () => {
     const store = new Store();
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     store.complete(turn({ outcome: "capped" }));
     store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
     expect(store.rounds.at(-1)?.round.step?.capped).toBe(15);
+    // The next step finishes it, once, under the same never-repeat key.
+    store.complete(look({ next: { text: "Add a boss." } }));
+    const finishing = store.step().step;
+    expect(finishing).toMatchObject({ kind: "turn", proposal: { why: "next" } });
+    expect(finishing.kind === "turn" ? finishing.proposal.text : "").toMatch(
+      /^Finish step 1: Add a score counter\.\n\nKurambit's time cap stopped step 1/,
+    );
+    expect(store.run.finish).toBeUndefined();
+    store.complete(turn({ outcome: "capped", runId: RunId.make("t3-run-2") }));
+    store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
+    expect(store.run.finish).toBeUndefined();
     const next = Decide.stepMessage(store.rounds, 0, {
       why: "next",
       text: "Add a boss.",
@@ -641,7 +624,7 @@ describe("a keep-going run", () => {
     ).toMatch(/^Keep going · step 4 /);
     const store = new Store();
     store.gameLastStep = 3;
-    store.start("autopilot");
+    store.start();
     store.complete(look());
     store.complete(turn());
     store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });

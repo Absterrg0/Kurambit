@@ -1,10 +1,4 @@
-import {
-  GameKeepGoingDecideInput,
-  GameKeepGoingDecideResult,
-  GameKeepGoingInput,
-  GameKeepGoingStatus,
-  GameKeepGoingStatusInput,
-} from "./gameRun.ts";
+import { GameKeepGoingInput, GameKeepGoingStatus, GameKeepGoingStatusInput } from "./gameRun.ts";
 import {
   GameArtAssetsInput,
   GameArtAssetsResult,
@@ -395,7 +389,6 @@ export const WS_METHODS = {
   gameArtThumbnail: "game.artThumbnail",
   gameKeepGoing: "game.keepGoing",
   gameKeepGoingStatus: "game.keepGoingStatus",
-  gameKeepGoingDecide: "game.keepGoingDecide",
   gameMediaSave: "game.mediaSave",
   gameSavedList: "game.savedList",
   gameSavedDelete: "game.savedDelete",
@@ -1587,11 +1580,6 @@ const WsGameKeepGoingStatusRpc = Rpc.make(WS_METHODS.gameKeepGoingStatus, {
   success: GameKeepGoingStatus,
   error: gameError,
 });
-const WsGameKeepGoingDecideRpc = Rpc.make(WS_METHODS.gameKeepGoingDecide, {
-  payload: GameKeepGoingDecideInput,
-  success: GameKeepGoingDecideResult,
-  error: gameError,
-});
 const WsGameMediaSaveRpc = Rpc.make(WS_METHODS.gameMediaSave, {
   payload: GameMediaSaveInput,
   success: GameSavedMedia,
@@ -1755,7 +1743,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameArtThumbnailRpc,
   WsGameKeepGoingRpc,
   WsGameKeepGoingStatusRpc,
-  WsGameKeepGoingDecideRpc,
   WsGameMediaSaveRpc,
   WsGameSavedListRpc,
   WsGameSavedDeleteRpc,

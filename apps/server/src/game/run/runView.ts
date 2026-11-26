@@ -10,11 +10,10 @@ import {
   type GameRunTurnStep,
   type ThreadId,
 } from "@kurambit/contracts";
-import * as DateTime from "effect/DateTime";
-
 import {
   RESUMABLE,
   type StepRecord,
+  budgetLeft,
   proposalSummary,
 } from "../../orchestration-v2/gameRun/decide.ts";
 
@@ -45,7 +44,7 @@ const endingMessage = (run: GameRun, records: ReadonlyArray<StepRecord>): string
     case "budget": {
       const kept = records.filter((r) => r.step.verdict !== "undone").length;
       const spent =
-        run.budgetMinutes === null ? "its time" : `its ${budgetText(run.budgetMinutes)}`;
+        run.budgetMinutes === null ? "its time" : `its ${budgetText(run.budgetMinutes)} of work`;
       return `Keep going paused: ${spent} is up (${records.length} step${records.length === 1 ? "" : "s"}, ${kept} kept).`;
     }
     case "done":
@@ -71,8 +70,9 @@ const phaseOf = (inFlight: GameRunStep | null): GameKeepGoingPhase | null => {
   switch (inFlight?.step.kind) {
     case "look":
       return inFlight.status === "running" ? "looking" : "waiting";
+    // An earlier Kurambit's proposal, which starts as soon as recovery finds it.
     case "propose":
-      return inFlight.step.deadline === null ? "held" : "proposed";
+      return "looking";
     case "turn":
       return "turn";
     case "judge":
@@ -83,8 +83,6 @@ const phaseOf = (inFlight: GameRunStep | null): GameKeepGoingPhase | null => {
       return null;
   }
 };
-
-const iso = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
 
 const refOf = (record: StepRecord, endedAt: string): GameKeepGoingStepRef => ({
   n: record.round,
@@ -123,17 +121,16 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       runId: null,
       chat: null,
       mode: "off",
-      profile: null,
       phase: null,
       step: null,
-      proposal: null,
       budgetMinutes: null,
-      endsAt: null,
+      budgetLeftMinutes: null,
       steps: [],
       firstStep: null,
       steer: [],
       setAside: [],
       ending: null,
+      endedAt: null,
       resumable: false,
       blocked: input.blocked,
       message: "Keep going is off.",
@@ -141,16 +138,6 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
   const live = run.status !== "ended";
   const phase = live ? phaseOf(inFlight) : null;
   const n = phase === null || phase === "waiting" || phase === "looking" ? null : input.n;
-  const proposal =
-    live && inFlight?.step.kind === "propose"
-      ? {
-          stepId: inFlight.id,
-          why: inFlight.step.proposal.why,
-          summary: proposalSummary(inFlight.step.proposal),
-          text: inFlight.step.proposal.text,
-          deadline: inFlight.step.deadline === null ? null : iso(inFlight.step.deadline),
-        }
-      : null;
   const turn = inFlight?.step.kind === "turn" ? inFlight.step : input.turn;
   const current: ReadonlyArray<GameKeepGoingStepRef> =
     n !== null &&
@@ -188,27 +175,30 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
       ? "Keep going waits for this turn to end."
       : phase === "looking"
         ? "Keep going is reading the current build's facts."
-        : proposal !== null
-          ? `Step ${n} · ${proposal.summary}`
-          : phase === "undoing"
-            ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
-            : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
+        : phase === "undoing"
+          ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
+          : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
     : endingMessage(run, records);
   return {
     runId: run.id,
     chat: run.threadId as ThreadId,
-    mode: live ? run.profile : "off",
-    profile: run.profile,
+    mode: live ? "on" : "off",
     phase,
     step: n,
-    proposal,
     budgetMinutes: run.budgetMinutes,
-    endsAt: live && run.budgetEndsAt !== null ? iso(run.budgetEndsAt) : null,
+    budgetLeftMinutes:
+      run.budgetMinutes === null
+        ? null
+        : Math.floor(
+            budgetLeft({ budgetMinutes: run.budgetMinutes, budgetUsedMs: run.budgetUsedMs ?? 0 }) /
+              60_000,
+          ),
     steps: [...current, ...done].slice(0, 10),
     firstStep: records[0]?.round ?? current[0]?.n ?? null,
     steer: [...run.steer],
     setAside: (run.setAside ?? []).map(({ text, why }) => ({ text, why })),
     ending: live ? null : run.ending,
+    endedAt: live ? null : run.endedAt,
     resumable: !live && run.ending !== null && RESUMABLE.has(run.ending),
     blocked: input.blocked,
     message,

@@ -494,8 +494,6 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.resume":
     case "game-run.stop":
     case "game-run.steer":
-    case "game-run.profile.set":
-    case "game-run.decide":
     case "game-run.step.start":
     case "game-run.step.complete":
     case "game-run.step.fail":
@@ -10828,8 +10826,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.resume":
       case "game-run.stop":
       case "game-run.steer":
-      case "game-run.profile.set":
-      case "game-run.decide":
       case "game-run.step.start":
       case "game-run.step.complete":
       case "game-run.step.fail":

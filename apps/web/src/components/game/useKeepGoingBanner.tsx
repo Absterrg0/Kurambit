@@ -6,11 +6,8 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
-import { KEEP_GOING_MODES, keepGoingBannerView, keepGoingHidesNext } from "./keepGoing.logic";
+import { keepGoingBannerView, keepGoingHidesNext } from "./keepGoing.logic";
 import { useKeepGoing } from "./useKeepGoing";
-
-const modeLabel = (mode: string) =>
-  KEEP_GOING_MODES.find((entry) => entry.mode === mode)?.label ?? mode;
 
 const endingTitle = (text: string) => (
   <Tooltip>
@@ -22,15 +19,15 @@ const endingTitle = (text: string) => (
 );
 
 /**
- * Keep going above the composer, in its own chat: what
- * the live run is doing with Stop, a Guided proposal with Start now, Edit
- * and Skip, or why it paused with Resume and what it did. Times are clock times; nothing
- * ticks, and it re-renders only on run pushes. `hidesNext` says when keep
- * going takes the agent's `Next:` line itself. Pass `null` off game threads.
+ * Keep going above the composer, in its own chat: what the live run is doing with Stop, or why
+ * it paused with Resume and what it did, until the person sends a turn there (`lastTurnAt`, when
+ * the chat's newest turn was asked for). Nothing ticks, and it re-renders only on run pushes.
+ * `hidesNext` says when keep going takes the agent's `Next:` line itself. Pass `null` off game
+ * threads.
  */
 export function useKeepGoingBanner(
   threadRef: ScopedThreadRef | null,
-  onEdit: (text: string) => void,
+  lastTurnAt: string | null,
 ): {
   readonly item: ComposerBannerStackItem | null;
   readonly hidesNext: boolean;
@@ -41,7 +38,7 @@ export function useKeepGoingBanner(
   const [dismissed, setDismissed] = useState<string | null>(null);
   const status = keepGoing.status;
   const threadId = threadRef?.threadId ?? "";
-  const view = keepGoingBannerView(status, threadId);
+  const view = keepGoingBannerView(status, threadId, lastTurnAt);
   const hidesNext = keepGoingHidesNext(status, threadId);
   const busy = keepGoing.sending;
   const stopRun =
@@ -76,72 +73,6 @@ export function useKeepGoingBanner(
       </Button>
     );
   switch (view.kind) {
-    case "proposal":
-      return {
-        hidesNext,
-        stop: stopRun,
-        item: {
-          id: view.id,
-          variant: "default",
-          priority: "activity",
-          icon,
-          title: (
-            <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className="shrink-0 text-muted-foreground">{view.lead}</span>
-              <Tooltip>
-                <TooltipTrigger
-                  render={<span className="min-w-0 truncate font-normal text-foreground" />}
-                >
-                  {view.line}
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  <span className="flex flex-col gap-1">
-                    <span>{view.text}</span>
-                    <span className="text-muted-foreground">Why: {view.why}</span>
-                  </span>
-                </TooltipPopup>
-              </Tooltip>
-            </span>
-          ),
-          // A separator before the time, so the action and when it starts read as two things.
-          description: `· ${view.detail}`,
-          actions: (
-            <>
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={busy || !keepGoing.canDecide}
-                onClick={() => void keepGoing.decide(view.stepId, "start")}
-              >
-                Start now
-              </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={busy || !keepGoing.canDecide}
-                onClick={() => {
-                  // The text lands in the composer first; holding stops the
-                  // default from starting the step under the person's hands.
-                  onEdit(view.text);
-                  if (!view.held) void keepGoing.decide(view.stepId, "hold");
-                }}
-              >
-                Edit
-              </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={busy || !keepGoing.canDecide}
-                onClick={() => void keepGoing.decide(view.stepId, "skip")}
-              >
-                Skip
-              </Button>
-              {/* The way out of the run, beside the step it would start. */}
-              {stop}
-            </>
-          ),
-        },
-      };
     case "live":
       return {
         hidesNext,
@@ -181,9 +112,9 @@ export function useKeepGoingBanner(
                 size="xs"
                 variant="ghost"
                 disabled={busy || !keepGoing.canOperate}
-                onClick={() => void keepGoing.choose(view.resume)}
+                onClick={() => void keepGoing.choose("on")}
               >
-                Resume ({modeLabel(view.resume)})
+                Resume
               </Button>
               {recap}
             </>

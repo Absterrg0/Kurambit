@@ -118,7 +118,6 @@ import {
   useStageDevViews,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
-import { clockTime } from "./keepGoing.logic";
 import { buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.logic";
 import { nextBuildOf } from "./GameLibraryStatus";
 import {
@@ -1351,12 +1350,6 @@ function ThreadGameStage({
     keepGoingStatus !== null &&
     keepGoingStatus.mode !== "off" &&
     keepGoingStatus.chat === threadRef.threadId;
-  const keepGoingStartsAt =
-    keepGoingHere &&
-    keepGoingStatus.phase === "proposed" &&
-    keepGoingStatus.proposal?.deadline != null
-      ? clockTime(keepGoingStatus.proposal.deadline)
-      : null;
   // The header names what plays: a copy by its own name, else the folder's build.
   // While a turn's build is saved it already plays: the header names it by its number.
   // A first build on the Stage before its turn ends is named as what it is: still being made.
@@ -1371,7 +1364,8 @@ function ThreadGameStage({
     ? {
         label: `Making build ${nextBuildNumber}`,
         name: `Build ${nextBuildNumber} · Keep going`,
-        caption: keepGoingStatus.proposal?.summary ?? null,
+        // The step at work is the newest, the only one without a verdict.
+        caption: keepGoingStatus.steps[0]?.verdict === null ? keepGoingStatus.steps[0].text : null,
         keepGoing: true,
       }
     : turnRunning || landing
@@ -1726,17 +1720,9 @@ function ThreadGameStage({
                   {failureVisible.split("\n")[0] ?? failureVisible}
                 </Text>
                 <div className="flex items-center gap-2">
-                  {keepGoingStartsAt === null ? (
-                    <Button size="sm" onClick={() => onAskAgent(failurePrompt)}>
-                      Ask the agent to fix it
-                    </Button>
-                  ) : (
-                    // Keep going already has the agent's next step waiting, in the row above the
-                    // composer: one route to the fix on screen, not two.
-                    <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
-                      Keep going takes its next step at {keepGoingStartsAt}
-                    </Text>
-                  )}
+                  <Button size="sm" onClick={() => onAskAgent(failurePrompt)}>
+                    Ask the agent to fix it
+                  </Button>
                   {turnUndoAllowed("undo") ? (
                     <Button
                       size="sm"
