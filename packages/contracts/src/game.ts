@@ -923,8 +923,11 @@ export const GameCheckResult = Schema.Struct({
       Schema.Struct({
         status: Schema.Literal("not-measured"),
         why: Schema.String,
-        /** The game's copy of the shell predates the QA play: a new build adds it. */
-        cause: Schema.optionalKey(Schema.Literal("old-shell")),
+        /**
+         * old-shell: the game's copy of the shell predates the QA play; a new build adds it.
+         * checker: the QA play's own page did not open (GameFactNotMeasuredCause).
+         */
+        cause: Schema.optionalKey(Schema.Literals(["old-shell", "checker"])),
       }),
     ]),
   ),
@@ -956,7 +959,12 @@ export const GameCheckResult = Schema.Struct({
         report: GamePlayerReport,
         ms: Schema.Number,
       }),
-      Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
+      Schema.Struct({
+        status: Schema.Literal("not-measured"),
+        why: Schema.String,
+        /** The first minute's own page did not open (GameFactNotMeasuredCause). */
+        cause: Schema.optionalKey(Schema.Literal("checker")),
+      }),
     ]),
   ),
   /**

@@ -281,6 +281,9 @@ export type GameBuild = typeof GameBuild.Type;
  * - slow: the game itself ran below real time on an idle machine (a step can make it faster).
  * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
  * - no-saved-plays: the game had no saved play to replay. Such a fact is not shown at all.
+ * - checker: the check's own page for this reading did not open or boot, after the game's
+ *   page booted in the same check: the checker could not take it, which says nothing about the
+ *   game; `why` says what stopped it, and the next measure takes it again.
  */
 export const GameFactNotMeasuredCause = Schema.Literals([
   "software",
@@ -288,6 +291,7 @@ export const GameFactNotMeasuredCause = Schema.Literals([
   "slow",
   "old-shell",
   "no-saved-plays",
+  "checker",
 ]);
 export type GameFactNotMeasuredCause = typeof GameFactNotMeasuredCause.Type;
 

@@ -153,7 +153,7 @@ const checksPhrase = (facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">):
  * What kept a fact from being measured, in a person's words. The server's own reason, with the
  * machine's figures and the renderer probe's output, is for agents and bug reports.
  */
-const CAUSE_WORDS: Readonly<Record<GameFactNotMeasuredCause, string>> = {
+const CAUSE_WORDS: Readonly<Record<Exclude<GameFactNotMeasuredCause, "checker">, string>> = {
   software:
     "this computer has no graphics card Kurambit can use, so plays here run too slowly to judge the game",
   busy: "this computer was busy with other work, so the reading says nothing about the game; the next measure takes it again",
@@ -162,11 +162,17 @@ const CAUSE_WORDS: Readonly<Record<GameFactNotMeasuredCause, string>> = {
   "no-saved-plays": "no test play is saved yet: save a run from the Stage's menu",
 };
 
-/** PURE. Why a fact has no reading, as a person reads it: its cause's words, else the build's own reason. */
+/**
+ * PURE. Why a fact has no reading, as a person reads it: its cause's words, else the build's own
+ * reason. The checker's own failure is said with what stopped it, which is the person's to see.
+ */
 export const notMeasuredWhy = (reading: {
   readonly why: string;
   readonly cause?: GameFactNotMeasuredCause;
-}): string => (reading.cause === undefined ? reading.why : CAUSE_WORDS[reading.cause]);
+}): string =>
+  reading.cause === undefined || reading.cause === "checker"
+    ? reading.why
+    : CAUSE_WORDS[reading.cause];
 
 /** The plays, whose readings are an event and its time. */
 const RUN_FACTS: ReadonlySet<GameFactId> = new Set(["idle", "masher"]);

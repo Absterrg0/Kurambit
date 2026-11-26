@@ -230,7 +230,7 @@ export const qaFact = (result: GameCheckResult): Facts["qa"] =>
     ? notMeasured("the boot check did not reach the gameplay entry", false)
     : result.qa.status === "measured"
       ? { status: "measured", value: result.qa.report }
-      : notMeasured(result.qa.why, false, false, result.qa.cause);
+      : notMeasured(result.qa.why, result.qa.cause === "checker", false, result.qa.cause);
 
 /** The other screen sizes, from the same boot check as the QA play. */
 export const screensFact = (result: GameCheckResult): Facts["screens"] =>
@@ -245,7 +245,12 @@ export const playerFact = (result: GameCheckResult): Facts["player"] =>
     ? notMeasured("the boot check did not reach the gameplay entry", false)
     : result.player.status === "measured"
       ? { status: "measured", value: result.player.report }
-      : notMeasured(result.player.why, false);
+      : notMeasured(
+          result.player.why,
+          result.player.cause === "checker",
+          false,
+          result.player.cause,
+        );
 
 const TONE_ORDER: Readonly<Record<GameFactTone, number>> = { bad: 0, good: 1, neutral: 2 };
 

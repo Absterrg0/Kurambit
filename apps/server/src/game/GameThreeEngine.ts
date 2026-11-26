@@ -57,7 +57,7 @@ import {
   type PageScene,
 } from "./sceneReport.ts";
 import { checkPerformance } from "./playPerf.ts";
-import { measurePlayer } from "./playerProbe.ts";
+import { firstLine, measurePlayer } from "./playerProbe.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
 /**
@@ -175,9 +175,23 @@ const sceneOf = async (
 
 const decodeQa = Schema.decodeUnknownOption(GameQaReport);
 const decodeReplay = Schema.decodeUnknownOption(GameReplayRun);
-/** The QA play's report as the check's: what to fix, or why it was not played. */
-const qaOf = (played: { readonly raw: unknown; readonly ms: number } | null): GameCheckQa => {
-  if (played === null) return { status: "not-measured", why: "the QA play's page did not open" };
+/**
+ * The QA play's report as the check's: what to fix, or why it was not played. `notOpened` is
+ * what kept the QA play's own page from opening after the game's page booted: the checker's
+ * failure, never a verdict on the game.
+ */
+const qaOf = (
+  played: { readonly raw: unknown; readonly ms: number } | null,
+  notOpened: string | null,
+): GameCheckQa => {
+  if (played === null)
+    return notOpened === null
+      ? { status: "not-measured", why: "the game's page crashed or timed out before the QA play" }
+      : {
+          status: "not-measured",
+          why: `Kurambit's checker could not open its own page for the QA play (${notOpened})`,
+          cause: "checker",
+        };
   if (played.raw === "no-qa")
     return {
       status: "not-measured",
@@ -465,6 +479,7 @@ export const makeThreeBackend = (
       let playPerf: unknown = null;
       // The QA play's report, from a page of its own after the measured play.
       let qaPlay: { readonly raw: unknown; readonly ms: number } | null = null;
+      let qaNotOpened: string | null = null;
       // The other screen sizes, played after the QA play.
       let screens: GameCheckScreens | undefined;
       // The first minute as a player meets it, after the screens (playerProbe.ts).
@@ -564,7 +579,11 @@ export const makeThreeBackend = (
                     }
                   },
                   qa: true,
-                }).catch(() => null);
+                }).catch((cause: unknown) => {
+                  qaNotOpened = firstLine(cause);
+                  log(`QA play's page did not open: ${qaNotOpened}`);
+                  return null;
+                });
                 if (session !== null) {
                   const raw = await session.qa();
                   await session.close();
@@ -586,8 +605,12 @@ export const makeThreeBackend = (
                   signal,
                 });
                 player =
-                  report === null
-                    ? { status: "not-measured", why: "the page as a player opens it did not boot" }
+                  "notOpened" in report
+                    ? {
+                        status: "not-measured",
+                        why: `Kurambit's checker could not open its own page for the first minute (${report.notOpened})`,
+                        cause: "checker",
+                      }
                     : {
                         status: "measured",
                         lines: gamePlayerLines(report),
@@ -636,7 +659,7 @@ export const makeThreeBackend = (
             sceneOf(scenePlay, temporary, NodePath.relative(ctx.root, temporary), browser),
           )
         : undefined;
-      const qa = input.qa && reached.includes("gameplay") ? qaOf(qaPlay) : undefined;
+      const qa = input.qa && reached.includes("gameplay") ? qaOf(qaPlay, qaNotOpened) : undefined;
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.map((line) => line.text).join("\n")}\n`).catch(

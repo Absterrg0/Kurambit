@@ -194,15 +194,16 @@ const light = (png: PNG) => {
 };
 
 /**
- * The first minute, measured on its own page. Null when the page never booted (the boot check
- * says why); a reading that could not be taken says so.
+ * The first minute, measured on its own page; `notOpened` says what kept that page from opening
+ * or booting (the check's other pages say whether the game boots). A reading that could not be
+ * taken says so.
  */
 export const measurePlayer = async (input: {
   readonly browser: GameBrowser;
   readonly url: string;
   readonly folder: string;
   readonly signal?: AbortSignal | undefined;
-}): Promise<GamePlayerReport | null> => {
+}): Promise<GamePlayerReport | { readonly notOpened: string }> => {
   const session = await openWebPlaySession({
     browser: input.browser,
     url: input.url,
@@ -210,14 +211,18 @@ export const measurePlayer = async (input: {
     bootTimeoutMs: BOOT_MS,
     signal: input.signal,
     initScript: PROBE,
-  }).catch(() => null);
-  if (session === null) return null;
+  }).catch((cause: unknown) => ({ notOpened: firstLine(cause) }));
+  if ("notOpened" in session) return session;
   try {
     return await probe(session, input.folder, input.browser.software);
   } finally {
     await session.close();
   }
 };
+
+/** An error's first line, short enough to say beside a fact. */
+export const firstLine = (cause: unknown) =>
+  (cause instanceof Error ? cause.message : String(cause)).split("\n")[0]!.slice(0, 240);
 
 const probe = async (
   session: WebPlaySession,
