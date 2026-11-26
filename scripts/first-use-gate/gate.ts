@@ -615,7 +615,7 @@ async function main() {
         client[WS_METHODS.gameKeepGoing]({
           threadId,
           commandId: `gate-${NodeCrypto.randomUUID()}`,
-          mode: "autopilot",
+          mode: "on",
           budgetMinutes: 10,
           note: PHRASES.step,
         } as never),

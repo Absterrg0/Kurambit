@@ -768,7 +768,7 @@ const setAside = (state: RunState, entry: SetAside): RunState =>
     : { ...state, setAside: [...state.setAside, entry] };
 
 /** A proposal an earlier Kurambit's Guided mode left waiting: it starts, or a turn went first. */
-export const applyDecided = (
+const applyDecided = (
   state: RunState,
   proposal: GameRunProposal,
   base: GameBuildId | null,

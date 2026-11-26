@@ -11,7 +11,7 @@
  *
  * `--brief` runs one brief of your own instead of briefs.json as the Kurambit lane beside the
  * bare lane (scripts/bench/bare/): `--reference` attaches a picture to it as Home does, and the
- * game gets the first turn and then Keep going on Autopilot until `--minutes` (30) from the
+ * game gets the first turn and then Keep going until `--minutes` (30) from the
  * moment the brief was sent, as a person who pressed Keep going would; at that cap its folder's
  * frame is taken the way the bare lane's is (`lane/<id>.png`), and anything still running stops.
  * `--rounds N` caps the lane by turns instead: the first turn, then N Keep going steps, each turn
@@ -452,7 +452,7 @@ const brokeOrBetter = (deltas: ReadonlyArray<GameFactDelta>, tone: "better" | "w
     .map((delta) => ({ id: delta.id, label: delta.label, a: delta.a, b: delta.b }));
 
 /**
- * Phase 2: keep going on the game, on Autopilot, until `STEPS` steps have a
+ * Phase 2: keep going on the game until `STEPS` steps have a
  * verdict or the run ends by itself; then the bench turns it off. Each step's
  * facts are compared with the build it started from, the way keep going
  * judged it, and the game's last build with its first.
@@ -474,7 +474,7 @@ async function keepGoing(
     client[WS_METHODS.gameKeepGoing]({
       threadId: game.threadId,
       commandId: `bench:${NodeCrypto.randomUUID()}`,
-      mode: "autopilot",
+      mode: "on",
       budgetMinutes: null,
     }),
   );
@@ -522,7 +522,7 @@ async function keepGoing(
 }
 
 /**
- * The lane after its first turn: Keep going on Autopilot until the cap, counted from the moment
+ * The lane after its first turn: Keep going until the cap, counted from the moment
  * the brief was sent, then the folder's frame as it stands at the cap (a step may be mid-edit,
  * as the bare agent may be when its cap stops it), then everything stopped.
  */
@@ -538,7 +538,7 @@ async function toCap(
     ROUNDS === null
       ? sentAt.getTime() + TURN_MINUTES * 60_000
       : Date.now() + ROUNDS * TURN_MINUTES * 60_000;
-  const keepGoing = (mode: "autopilot" | "off", budgetMinutes?: number | null) =>
+  const keepGoing = (mode: "on" | "off", budgetMinutes?: number | null) =>
     call(server, cookie, (client) =>
       client[WS_METHODS.gameKeepGoing]({
         threadId: game.threadId,
@@ -553,10 +553,10 @@ async function toCap(
   if (turnEnded && (ROUNDS === null ? left >= 1 : ROUNDS > 0)) {
     log(
       ROUNDS === null
-        ? `${id}: keep going on Autopilot for the ${left} min left`
-        : `${id}: keep going on Autopilot for ${ROUNDS} step(s)`,
+        ? `${id}: keep going for the ${left} min left`
+        : `${id}: keep going for ${ROUNDS} step(s)`,
     );
-    now = await keepGoing("autopilot", ROUNDS === null ? left : null);
+    now = await keepGoing("on", ROUNDS === null ? left : null);
     // The status lists steps newest first: each one is logged once, by its number.
     const logged = new Set<number>();
     while (now.mode !== "off" && Date.now() < capAt && (ROUNDS === null || settled() < ROUNDS)) {
