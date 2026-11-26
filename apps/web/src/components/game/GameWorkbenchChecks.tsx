@@ -898,10 +898,10 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
           <ControlsEvidence
             threadKey={scopedThreadKey(threadRef)}
             facts={facts}
-            // A problem lists the controls that do nothing; a pass, the ones that answered.
+            // A problem lists the controls not read; a pass, the ones that answered.
             only={toneOf(check) === "bad" ? ["dead"] : ["works"]}
           />
-          {/* The key rows say which control does nothing; the lines only when there are none. */}
+          {/* The key rows say which control was not read; the lines only when there are none. */}
           {hasControls(facts) ? null : <ProblemLines lines={qaLines(facts, "controls")} />}
           {recordings}
         </EvidenceBlock>

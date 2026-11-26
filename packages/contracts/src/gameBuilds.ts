@@ -681,7 +681,7 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
           };
         if (found.dead.length > 0)
           return measured({
-            text: `${listedNames(found.dead)} ${found.dead.length === 1 ? "is" : "are"} never read: pressing ${found.dead.length === 1 ? "it does" : "them does"} nothing`,
+            text: `${listedNames(found.dead)} ${found.dead.length === 1 ? "was" : "were"} not read ${found.where}`,
             value: found.dead.length,
             tone: "bad",
             kind: "dead",
@@ -981,9 +981,12 @@ const checkWords = (
       if (facts.qa.status !== "measured") return null;
       const found = gameQaFindings(facts.qa.value);
       return found.dead.length === 1
-        ? { sentence: `${found.dead[0]} does nothing`, value: null }
+        ? { sentence: `${found.dead[0]} was not read ${found.where}`, value: null }
         : found.dead.length > 1
-          ? { sentence: `${found.dead.length} controls do nothing`, value: listedNames(found.dead) }
+          ? {
+              sentence: `${found.dead.length} controls were not read ${found.where}`,
+              value: listedNames(found.dead),
+            }
           : {
               sentence: "Every control works",
               // Read, but answered nothing the play could see, as one that works only in some

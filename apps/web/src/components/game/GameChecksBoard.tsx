@@ -496,7 +496,7 @@ const keyWord = (code: string) =>
 /**
  * A control as the controls check judges it (gameQaFindings): it answered; the game read it but
  * the play saw nothing change, so it is the person's to try and the check still passes; or the
- * game never read it, so it does nothing and the check is a problem.
+ * game read it nowhere the play went, which the check counts as a problem.
  */
 export type ControlVerdict = "works" | "try" | "dead";
 const verdictOf = (control: GameQaControl): ControlVerdict =>
@@ -581,7 +581,7 @@ export const hasControls = (facts: GameBuildFacts) =>
 
 /**
  * The controls the check pressed, each as its keys, its name and what it did, judged as the check
- * judges them: one it counts as doing nothing is amber, keys and all.
+ * judges them: one it never saw read is amber, keys and all.
  */
 export function ControlsEvidence({
   threadKey,
@@ -590,7 +590,7 @@ export function ControlsEvidence({
 }: {
   threadKey: string;
   facts: GameBuildFacts;
-  /** The controls to list: the ones that do nothing, the ones to try, or the ones that work. */
+  /** The controls to list: the ones not read, the ones to try, or the ones that work. */
   only: ReadonlyArray<ControlVerdict>;
 }) {
   const qa = measured(facts.qa);
@@ -643,7 +643,7 @@ function ControlLine({ row }: { row: ControlRow }) {
         render={<span className={cn("text-end", dead && "text-warning-foreground")} />}
       >
         {/* A control to try sits under a heading that says so. */}
-        {row.verdict === "works" ? row.did : dead ? "does nothing" : null}
+        {row.verdict === "works" ? row.did : dead ? "not read" : null}
       </Text>
     </li>
   );

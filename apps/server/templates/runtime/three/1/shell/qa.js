@@ -4,8 +4,9 @@
 //
 //   - every control works: each action the game declares (ACTIONS, shell/controls.js) is held
 //     for a moment on a fresh run, and something answers it: the player moves or turns, a
-//     GameState value changes, a Juice effect or a sound fires, or something appears. An
-//     action the game never reads through ctx.input is dead for certain.
+//     GameState value changes, a Juice effect or a sound fires, or something appears. What
+//     the game reads through ctx.input is also collected on its title and its ending: an
+//     action read on none of them is reported as not read there, which is what was seen.
 //   - Retry starts clean: a run is ended and retried as GameState.play() retries it, and the
 //     new run is counted against the one before it: the scene's objects, the listeners on
 //     window and document, the intervals running, the animation frames asked for each
@@ -32,6 +33,8 @@ const OPENING_MS = 1200;
 /** Fresh run every few actions, so a player hurt by then still answers. */
 const ACTIONS_PER_RUN = 3;
 const START_MS = 4000;
+/** On the title or the ending, long enough for a screen that takes input only after a beat. */
+const SCREEN_MS = 1500;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -181,21 +184,21 @@ export function createQa({
   };
 
   // A game drawing its own title may read a key there only (the one that leaves it): pressed in
-  // play it answers nothing, which is no dead control. A title run's reads name those keys.
+  // play it answers nothing, which is no dead control. A title run's reads name those keys; null
+  // when the game shows no title of its own.
   const titleKeys = async () => {
     openTitle();
     const started = performance.now();
     while (current()?.compiling === true && performance.now() - started < START_MS) await wait(50);
-    await span(SETTLE_MS);
+    await span(SCREEN_MS);
     const run = current();
-    return run !== null && GameState.state === "title" ? new Set(run.input.reads) : new Set();
+    return run !== null && GameState.state === "title" ? new Set(run.input.reads) : null;
   };
 
   // Errors thrown while a control was pressed, each named by the control.
   const thrown = [];
   const everyControl = async () => {
     const out = [];
-    const onTitle = await titleKeys();
     let run = null;
     let onRun = 0;
     for (const action of controls.actions.values()) {
@@ -214,7 +217,6 @@ export function createQa({
       const found = await probe(run, action.name);
       for (const error of errors.slice(errorsFrom))
         if (thrown.length < 10) thrown.push(`${action.label}: ${error.message}`.slice(0, 240));
-      if (found.length === 0 && onTitle.has(action.name)) continue;
       out.push({
         name: action.name,
         label: action.label,
@@ -254,17 +256,23 @@ export function createQa({
     GameState.lose("QA play");
     const ended = performance.now();
     while (GameState.state !== "ended" && performance.now() - ended < START_MS) await span(50);
-    if (GameState.state !== "ended") return { before, after: null, errors: [] };
-    await span(300);
+    if (GameState.state !== "ended") return { report: { before, after: null, errors: [] } };
+    // The ending is a screen of its own (Retry, Back to title): what the game reads there, as on
+    // the title. The run's reads are its whole life's, and any read anywhere is no dead control.
+    await span(SCREEN_MS);
+    const atEnd = current() === first ? new Set(first.input.reads) : null;
     restart();
     const again = await playing();
-    if (again === null) return { before, after: null, errors: [] };
+    if (again === null) return { report: { before, after: null, errors: [] }, atEnd };
     await span(800);
     const after = await count(again);
     return {
-      before,
-      after,
-      errors: errors.slice(errorsBefore).map((error) => error.message.slice(0, 200)),
+      report: {
+        before,
+        after,
+        errors: errors.slice(errorsBefore).map((error) => error.message.slice(0, 200)),
+      },
+      atEnd,
     };
   };
 
@@ -275,9 +283,22 @@ export function createQa({
       canLose(false);
       hold(true);
       try {
-        const controlsFound = await everyControl();
+        const onTitle = await titleKeys();
+        const pressed = await everyControl();
         const retried = await retry();
-        return { version: 1, controls: controlsFound, retry: retried, errors: thrown };
+        const atEnd = retried?.atEnd ?? null;
+        const elsewhere = (name) => onTitle?.has(name) === true || atEnd?.has(name) === true;
+        // A key read only on the title or the ending answers nothing in play: it works there.
+        const controlsFound = pressed
+          .filter((control) => control.answers.length > 0 || !elsewhere(control.name))
+          .map((control) => ({ ...control, read: control.read || elsewhere(control.name) }));
+        return {
+          version: 1,
+          controls: controlsFound,
+          retry: retried?.report ?? null,
+          errors: thrown,
+          visited: [...(onTitle === null ? [] : ["title"]), ...(atEnd === null ? [] : ["end"])],
+        };
       } finally {
         hold(false);
         canLose(true);

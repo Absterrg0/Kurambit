@@ -15,7 +15,10 @@ export const GameQaControl = Schema.Struct({
   label: Text(80),
   /** Its keys as KeyboardEvent codes ("KeyE"), as the play had them. Absent from older shells. */
   keys: Schema.optionalKey(Schema.Array(Text(32)).check(Schema.isMaxLength(4))),
-  /** The game asked ctx.input about it during the run: an action never read is dead for certain. */
+  /**
+   * The game asked ctx.input about it: in its run, on its title or at its ending (`visited`). One
+   * not read there may still be read on a screen the play never reaches (a shop, an upgrade pick).
+   */
   read: Schema.Boolean,
   /** What two of its presses agreed answered it ("moved", "juice", "changed score"); empty: nothing. */
   answers: Schema.Array(Text(80)).check(Schema.isMaxLength(12)),
@@ -63,8 +66,26 @@ export const GameQaReport = Schema.Struct({
    * ("Jump: x is undefined"). Absent from shells that predate it.
    */
   errors: Schema.optionalKey(Schema.Array(Text(240)).check(Schema.isMaxLength(10))),
+  /**
+   * The game's own screens besides play where the play also read what the game asks ctx.input
+   * about. Absent from shells that predate it, which read the title only.
+   */
+  visited: Schema.optionalKey(
+    Schema.Array(Schema.Literals(["title", "end"])).check(Schema.isMaxLength(2)),
+  ),
 });
 export type GameQaReport = typeof GameQaReport.Type;
+
+/** PURE. Where the play looked for a control being read: "in play, on the title or at the end". */
+export const gameQaWhere = (report: GameQaReport): string => {
+  const visited = report.visited ?? ["title"];
+  const places = [
+    "in play",
+    ...(visited.includes("title") ? ["on the title"] : []),
+    ...(visited.includes("end") ? ["at the end"] : []),
+  ];
+  return places.length === 1 ? places[0]! : `${places.slice(0, -1).join(", ")} or ${places.at(-1)}`;
+};
 
 /** Where Retry's counts read as state the game kept outside its run. */
 const OBJECTS_GROWTH = 1.5;
@@ -76,10 +97,12 @@ export const listedNames = (names: ReadonlyArray<string>) =>
   names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 /**
- * PURE. A QA report as findings. `dead`, `errors`, `retry` and `hud` are certain (the check
- * fails on them). `silent` controls are read but answered nothing the play could see, which a
- * control that works only in some places also does (a frog's "down" at its start row), so they
- * are never a problem: agents sent to fix them broke working controls.
+ * PURE. A QA report as findings. `errors`, `retry` and `hud` are certain (the check fails on
+ * them). `dead` controls were not read anywhere the play went (`where`): the check fails on them
+ * too, worded as what was seen, since a screen the play never reaches may read them. `silent`
+ * controls are read but answered nothing the play could see, which a control that works only in
+ * some places also does (a frog's "down" at its start row), so they are never a problem: agents
+ * sent to fix them broke working controls.
  */
 export const gameQaFindings = (report: GameQaReport) => {
   const dead = report.controls.filter((control) => !control.read).map((control) => control.label);
@@ -137,6 +160,8 @@ export const gameQaFindings = (report: GameQaReport) => {
   }
   return {
     dead,
+    /** Where the dead controls were not read. */
+    where: gameQaWhere(report),
     silent,
     retry,
     hud,
@@ -152,7 +177,7 @@ export const gameQaProblems = (findings: GameQaFindings): ReadonlyArray<string> 
   ...(findings.dead.length === 0
     ? []
     : [
-        `${listedNames(findings.dead)} ${findings.dead.length === 1 ? "is" : "are"} in ACTIONS but the game never reads ${findings.dead.length === 1 ? "it" : "them"}: make each do something, or drop it with null in ACTIONS so Controls never lists a dead key.`,
+        `${listedNames(findings.dead)} ${findings.dead.length === 1 ? "was" : "were"} not read ${findings.where}. The QA play does not reach every screen (a shop, an upgrade pick, a pause menu): if one reads ${findings.dead.length === 1 ? "it" : "them"}, leave ${findings.dead.length === 1 ? "it" : "them"} as ${findings.dead.length === 1 ? "it is" : "they are"}; if none does, drop ${findings.dead.length === 1 ? "it" : "each"} with null in ACTIONS so Controls never lists a dead key. Never bind a key to another action to make this pass.`,
       ]),
   ...findings.errors
     .slice(0, 3)

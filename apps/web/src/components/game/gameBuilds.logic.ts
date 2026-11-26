@@ -70,8 +70,8 @@ const factsSummaryLine = (summary: GameBuildFactsSummary): string | null => {
 };
 
 /**
- * A failing QA check's detail, one line a finding, as a player would hit it: the controls that
- * do nothing, what Retry kept, the HUD text off the view, the errors pressing a control threw,
+ * A failing QA check's detail, one line a finding, as a player would hit it: the controls not
+ * read, what Retry kept, the HUD text off the view, the errors pressing a control threw,
  * and what broke at another screen size.
  */
 export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<string> => {
@@ -83,7 +83,7 @@ export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<st
   const found = gameQaFindings(facts.qa.value);
   switch (id) {
     case "controls":
-      return found.dead.length > 0 ? [`Never read by the game: ${found.dead.join(", ")}`] : [];
+      return found.dead.length > 0 ? [`Not read ${found.where}: ${found.dead.join(", ")}`] : [];
     case "retry":
       return found.retry.map((each) => each.said);
     case "hud":
