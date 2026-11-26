@@ -36,7 +36,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
-import { directionDone, replyHeadline } from "../../orchestration-v2/gameRun/decide.ts";
+import { directionDone, replyHeadline, stepNumber } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   type StepTurn,
@@ -695,7 +695,13 @@ const make = Effect.gen(function* () {
       const records = yield* projections.getGameRunRecords(threadId, { steps: "in-flight" });
       const run = records.gameRuns.at(-1);
       if (run === undefined) return;
-      yield* operations.runChanged(root, run.status === "ended" ? null : stepLine());
+      // The step the game's card says: a push that said only "Keep going" never reread the list.
+      yield* operations.runChanged(
+        root,
+        run.status === "ended"
+          ? null
+          : stepLine(stepNumber(records.gameRunRounds, records.gameLastStep)),
+      );
       // A run that ended has no work left: Off, a pause or the end stop its jobs.
       if (run.status === "ended") yield* jobs.stopRun(run.id);
     });
