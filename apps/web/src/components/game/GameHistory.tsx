@@ -10,6 +10,7 @@ import type { GameStageRequest } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn, randomUUID } from "../../lib/utils";
 import { gameEnvironment, olderBuildPages } from "../../state/game";
+import { undoneAlone } from "../../state/gameTurnBuild";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -269,6 +270,8 @@ export function GameHistory({
   const undoable = (build: GameBuild) =>
     canUndo && place._tag === "game" && build.number !== null && build.available;
 
+  // Builds whose change was undone alone: their Redo is the header's, or their chat line's.
+  const alone = undoneAlone(list?.builds ?? []);
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
   const showNow =
@@ -282,9 +285,9 @@ export function GameHistory({
       label={label}
       onStage={onStage === build.id}
       copy={playing === build.id}
-      undone={build.undone}
+      undone={build.undone || alone.has(build.id)}
       onClick={() => play(build)}
-      {...(undoable(build) && !build.undone
+      {...(undoable(build) && !build.undone && !alone.has(build.id)
         ? { onUndo: () => void undoBuild(build), undoing: undoing === build.id }
         : {})}
     />
@@ -391,7 +394,7 @@ export function GameHistory({
   );
 }
 
-/** The pictures in one scrolling row that starts at the newest, and stays there as builds land. */
+/** The pictures in one scrolling row that starts at the newest each time History opens. */
 function StripRow({
   open,
   count,
@@ -402,11 +405,16 @@ function StripRow({
   children: ReactNode;
 }) {
   const row = useRef<HTMLDivElement | null>(null);
+  // Once per opening, when it first has pictures: a build landing or a Now row appearing after
+  // a pick never scrolls the row, which would put another build's Undo under the pointer.
+  const scrolled = useRef(false);
   // The popover lays its content out a frame after it opens: the scroll waits for that frame.
   useLayoutEffect(() => {
     const node = row.current;
-    if (node === null || !open || count === 0) return;
+    if (!open) scrolled.current = false;
+    if (node === null || !open || count === 0 || scrolled.current) return;
     const frame = requestAnimationFrame(() => {
+      scrolled.current = true;
       node.scrollLeft = node.scrollWidth;
     });
     return () => cancelAnimationFrame(frame);

@@ -117,22 +117,68 @@ export function useTurnUndo(threadRef: ScopedThreadRef | null, runId: string | n
   // The quiet shell: a streaming turn does not re-render every card.
   const shell = useQuietThreadShell(threadRef);
   const restores = useBuildRestore(threadRef, view?.restore ?? null);
+  const undoes = useBuildUndo(threadRef);
   const action =
     view === null ? null : turnStripRestore(view, threadRuntimeIsActive(shell?.runtime));
   const send = async (): Promise<string | null> => {
     if (view === null || action === null) return null;
+    if (action.via === "undo") return undoes.send(action.target);
     return restores.send(
       action.target,
       action.kind === "go-back" ? restoreQuestion(view.build.name) : null,
     );
   };
+  const viaUndo = action?.via === "undo";
   return {
     view,
     action,
-    canRestore: restores.canRestore,
-    pending: restores.pending,
-    restoring: action !== null && restores.restoring(action.target),
-    error: action === null ? null : restores.error(action.target),
+    canRestore: viaUndo ? undoes.canUndo : restores.canRestore,
+    pending: restores.pending || undoes.pending !== null,
+    restoring:
+      action !== null &&
+      (viaUndo ? undoes.pending === action.target : restores.restoring(action.target)),
+    error: action === null ? null : (viaUndo ? undoes.error : restores.error)(action.target),
+    send,
+  };
+}
+
+/**
+ * Undoes one build's change alone, later builds kept; undoing an undo build is its Redo. The
+ * answer lands as a new build in the list. Answers why nothing moved, or null.
+ */
+export function useBuildUndo(threadRef: ScopedThreadRef | null) {
+  const canUndo = useAtomValue(
+    threadRef === null
+      ? NO_PERMISSION
+      : gameEnvironment.buildUndo.permissionAtom(threadRef.environmentId),
+  );
+  const undo = useAtomCommand(gameEnvironment.buildUndo, { reportFailure: false });
+  const [pending, setPending] = useState<GameBuildId | null>(null);
+  const [error, setError] = useState<{ readonly target: string; readonly text: string } | null>(
+    null,
+  );
+  const send = async (target: GameBuildId): Promise<string | null> => {
+    if (threadRef === null || pending !== null) return null;
+    setPending(target);
+    setError(null);
+    const result = await undo({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, build: target, commandId: randomUUID() },
+    });
+    setPending(null);
+    const text =
+      result._tag === "Failure"
+        ? String(squashAtomCommandFailure(result))
+        : result.value._tag === "conflicts"
+          ? result.value.message
+          : null;
+    if (text !== null) setError({ target, text });
+    return text;
+  };
+  return {
+    canUndo,
+    pending,
+    error: (target: GameBuildId) => (error?.target === target ? error.text : null),
     send,
   };
 }

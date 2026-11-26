@@ -652,7 +652,14 @@ function ThreadGameStage({
   const undoNamed = undoName !== null && turnUndoAllowed("undo");
   const undoLabel = undoNamed ? `Undo ${undoName}` : "Undo";
   const undoDetail = undoNamed ? undoOutcome(undoBaseName ?? null, changedSince != null) : null;
-  const redoLabel = undoName !== null && turnUndoAllowed("redo") ? `Redo ${undoName}` : "Redo";
+  // A change undone alone comes back by name: the build it undid, not the undo itself.
+  const redoName =
+    turnUndo.view?.redo != null
+      ? turnUndo.view.redo.name === null
+        ? null
+        : buildPhrase(turnUndo.view.redo.name)
+      : undoName;
+  const redoLabel = redoName !== null && turnUndoAllowed("redo") ? `Redo ${redoName}` : "Redo";
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);

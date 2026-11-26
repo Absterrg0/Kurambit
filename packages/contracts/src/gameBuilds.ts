@@ -240,6 +240,12 @@ export const GameBuild = Schema.Struct({
   name: Schema.String,
   /** A restore moved the folder away from it: made after the build it put back, so not in the game now. */
   undone: Schema.Boolean,
+  /**
+   * An undo's (`saved` with edit "undo"): the build whose change it reversed alone. Undoing an
+   * undo is its Redo, so a build is undone alone while the newest undo naming it was not itself
+   * undone.
+   */
+  undid: Schema.optionalKey(GameBuildId),
   summary: Schema.String,
   /** At most 8, most changed first. */
   files: Schema.Array(GameBuildFile),

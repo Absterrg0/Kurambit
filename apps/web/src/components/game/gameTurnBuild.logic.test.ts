@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { GameBuildId, type GameBuild, type GameBuildsResult } from "@kurambit/contracts";
 
 import { selectTurnBuild, type TurnBuildView } from "../../state/gameTurnBuild";
 import {
@@ -99,5 +100,47 @@ describe("a turn's strip", () => {
     const latest = view();
     const live = { ...latest, build: { ...latest.build, noRestore: "Stop the run first." } };
     expect(turnStripRestore(live, true)?.blocked).toBe("Stop the run first.");
+  });
+});
+
+// History's Undo on one build lands as a build of its own; undoing that undo is its Redo.
+describe("a build undone alone", () => {
+  const UNDO = GameBuildId.make("1".repeat(40));
+  const REDO = GameBuildId.make("2".repeat(40));
+  const AGAIN = GameBuildId.make("3".repeat(40));
+  const undoOf = (id: GameBuildId, undid: GameBuildId, number: number): GameBuild => ({
+    ...FAKE_BUILDS_RESULT.builds[0]!,
+    id,
+    number,
+    name: `Build ${number}`,
+    source: { _tag: "saved", label: "Undid", edit: "undo" },
+    undid,
+    base: null,
+  });
+  const after = (...undos: ReadonlyArray<GameBuild>): GameBuildsResult => ({
+    ...FAKE_BUILDS_RESULT,
+    builds: [...undos, ...FAKE_BUILDS_RESULT.builds],
+    current: undos[0]!.id,
+  });
+  const undone = after(undoOf(UNDO, BUILD_C, 6));
+  const TURN_5_NAME = FAKE_BUILDS_RESULT.builds[0]!.name;
+
+  it("offers Redo on the undone turn and on the undo while it is the latest, both undoing the undo", () => {
+    const redo = { kind: "redo", target: UNDO, blocked: null, via: "undo" };
+    expect(turnStripRestore(view(undone, TURN_5), false)).toEqual(redo);
+    expect(view(undone, TURN_5).redo).toEqual({ undo: UNDO, name: TURN_5_NAME });
+    expect(turnStripRestore(view(undone, null), false)).toEqual(redo);
+    // The latest's Redo names the build it brings back, not the undo.
+    expect(view(undone, null).redo?.name).toBe(TURN_5_NAME);
+  });
+
+  it("is no longer undone once its undo was undone, and is again when that Redo is undone", () => {
+    const redone = after(undoOf(REDO, UNDO, 7), undoOf(UNDO, BUILD_C, 6));
+    expect(view(redone, TURN_5).redo).toBeNull();
+    // The Redo is the latest: its own Undo is a plain one, not another Redo.
+    expect(view(redone, null).redo).toBeNull();
+    expect(turnStripRestore(view(redone, TURN_5), false)?.kind).not.toBe("redo");
+    const again = after(undoOf(AGAIN, REDO, 8), undoOf(REDO, UNDO, 7), undoOf(UNDO, BUILD_C, 6));
+    expect(view(again, TURN_5).redo).toEqual({ undo: UNDO, name: TURN_5_NAME });
   });
 });

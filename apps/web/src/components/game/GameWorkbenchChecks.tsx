@@ -47,6 +47,7 @@ import {
   useThreadProjection,
 } from "../../state/entities";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
+import { turnBuildView } from "../../state/gameTurnBuild";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -66,7 +67,12 @@ import {
 import { stageBuildId } from "./gameBuildTimeline.logic";
 import { replayStageRun, useThreadStageBridge } from "./gameStageBridge";
 import { turnStripRestore } from "./gameTurnBuild.logic";
-import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
+import {
+  restoreQuestion,
+  useBuildRestore,
+  useBuildUndo,
+  useMeasureOnOpen,
+} from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
 import {
   ControlsEvidence,
@@ -248,29 +254,23 @@ function BuildHeader({
 }) {
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const restores = useBuildRestore(threadRef, list.restore);
+  const undoes = useBuildUndo(threadRef);
   // The quiet shell: a streaming turn does not re-render the Workbench.
   const turnRunning = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   const onStageNow = stageBuildId(list, useAtomValue(stagePlayTarget(threadRef))?.build ?? null);
   const latestUndoable = list.builds.find((entry) => ownsUndo(entry.source)) ?? null;
-  const action = !canAct
-    ? null
-    : turnStripRestore(
-        {
-          build,
-          latest: build.id === latestUndoable?.id,
-          restore: list.restore,
-          current: list.current,
-          folderEdited: list.folderEdited,
-        },
-        turnRunning,
-      );
+  const view = canAct ? turnBuildView(list, build, build.id === latestUndoable?.id) : null;
+  const action = view === null ? null : turnStripRestore(view, turnRunning);
+  // A Redo names the build it brings back: an undo's own detail names the build it undid.
+  const restoreName = action?.via === "undo" ? (view?.redo?.name ?? build.name) : build.name;
   const index = list.builds.findIndex((entry) => entry.id === build.id);
   const previous =
     list.builds.find((entry) => entry.id === build.base) ??
     (index === -1 ? undefined : list.builds[index + 1]);
   const kind = action === null ? null : RESTORE[action.kind];
-  const error = action === null ? null : restores.error(action.target);
+  const viaUndo = action?.via === "undo";
+  const error = action === null ? null : (viaUndo ? undoes.error : restores.error)(action.target);
   const canPlay = build.available && build.id !== onStageNow;
   // A build another chat made says whose it is: the top bar, this chat's last line and Checks
   // can each name a different build, and only this relates them.
@@ -337,19 +337,28 @@ function BuildHeader({
             <MenuPopup side="bottom" align="end" sideOffset={4} className="w-64">
               {action !== null && kind !== null ? (
                 <MenuItem
-                  disabled={action.blocked !== null || !restores.canRestore || restores.pending}
+                  disabled={
+                    action.blocked !== null ||
+                    !(viaUndo ? undoes.canUndo : restores.canRestore) ||
+                    restores.pending ||
+                    undoes.pending !== null
+                  }
                   onClick={() =>
-                    void restores.send(
-                      action.target,
-                      action.kind === "go-back" ? restoreQuestion(build.name) : null,
-                    )
+                    void (viaUndo
+                      ? undoes.send(action.target)
+                      : restores.send(
+                          action.target,
+                          action.kind === "go-back" ? restoreQuestion(build.name) : null,
+                        ))
                   }
                 >
                   <Undo2Icon className="mt-0.5 self-start" />
                   <span className="flex min-w-0 flex-col">
-                    {restores.restoring(action.target)
+                    {(
+                      viaUndo ? undoes.pending === action.target : restores.restoring(action.target)
+                    )
                       ? kind.busy
-                      : kind.label(buildPhrase(build.name))}
+                      : kind.label(buildPhrase(restoreName))}
                     <Text variant="caption" tone="muted">
                       {action.blocked ??
                         (action.kind === "undo"
@@ -358,7 +367,9 @@ function BuildHeader({
                               list.folderEdited === true,
                             )
                           : action.kind === "redo"
-                            ? "The game becomes this build again"
+                            ? viaUndo
+                              ? "Its change comes back; later builds stay"
+                              : "The game becomes this build again"
                             : "The game becomes this build; later ones stay in the strip")}
                     </Text>
                   </span>

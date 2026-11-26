@@ -102,7 +102,11 @@ export function GameTurnBuild({
           }}
         >
           <span className="truncate">
-            {step?.verdict != null ? `${stepVerdictText(step)} · ` : ""}
+            {step?.verdict != null
+              ? `${stepVerdictText(step)} · `
+              : undo.action?.kind === "redo"
+                ? "Undone · "
+                : ""}
             {checksLine(build.facts)}
           </span>
         </Button>

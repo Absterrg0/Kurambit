@@ -15,6 +15,7 @@ export const turnBuildIsFolder = (view: TurnBuildView): boolean =>
  * What a turn's strip offers for the folder: Undo on the game's latest
  * turn build restores the build it was made from; after that, Redo restores
  * the folder from before the undo; an older turn goes back to its own build.
+ * A build whose change was undone alone offers Redo, as that undo does while it is the latest.
  */
 export interface TurnStripRestore {
   readonly kind: "undo" | "redo" | "go-back";
@@ -22,6 +23,11 @@ export interface TurnStripRestore {
   readonly target: GameBuildId;
   /** Why it cannot be pressed now, or null. The server decides either way. */
   readonly blocked: string | null;
+  /**
+   * "undo": the Redo of a change undone alone, which undoes `target`, that undo build (the
+   * server's Redo, which also takes the undo out of the game's decisions). Absent: a restore.
+   */
+  readonly via?: "undo";
 }
 
 /**
@@ -37,6 +43,8 @@ export const turnStripRestore = (
   const { build, restore } = view;
   const blocked = (what: string) =>
     build.noRestore ?? (turnRunning ? `Wait for the agent's turn to end to ${what}.` : null);
+  if (view.redo !== null)
+    return { kind: "redo", target: view.redo.undo, blocked: blocked("redo"), via: "undo" };
   if (view.latest) {
     if (build.base === null) return null;
     if (

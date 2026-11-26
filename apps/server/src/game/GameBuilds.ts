@@ -941,6 +941,7 @@ const make = Effect.gen(function* () {
             r.id !== folder?.current &&
             r.at > target.at &&
             r.at < restore.requestedAt,
+          ...(r.kind === "undo" && r.undid !== undefined ? { undid: r.undid } : {}),
           base: r.base,
           summary: r.summary,
           files: r.files,
