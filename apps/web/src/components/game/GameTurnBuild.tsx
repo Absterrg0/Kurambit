@@ -70,8 +70,10 @@ export function GameTurnBuild({
   const undone = view.undone || step?.verdict === "undone";
   // An undone build is out of the game: its settled checks still describe it, but whether it is
   // still being measured, queued or never was is not worth a word after "Undone".
+  const verdict = step === null || step.verdict === null ? null : stepVerdictText(step);
   const said = [
-    step?.verdict != null ? stepVerdictText(step) : undone ? "Undone" : null,
+    // Undone by the person, a step's line says so too, not the verdict it had before.
+    undone && step?.verdict !== "undone" ? "Undone" : verdict,
     undone && !factsSettled(build.facts) ? null : checksLine(build.facts),
   ]
     .filter((part) => part !== null)
