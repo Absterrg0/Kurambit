@@ -1295,6 +1295,13 @@ let last = performance.now();
 // The scene report's last sample, which ran after the previous draw: the measuring's own time
 // stays out of the frame times the performance fact and the render scale judge the game by.
 let measuredMs = 0;
+/** On a fast display, at most one draw this often, with slack for a frame's jitter. */
+const DRAW_EVERY_MS = 1000 / 60;
+const DRAW_SLACK_MS = 2;
+let nextDrawAt = 0;
+/** Real time and game time since the last draw, which the next draw is handed. */
+let drawnMs = 0;
+let drawnDt = 0;
 renderer.setAnimationLoop((now) => {
   const elapsedMs = Math.max(now - last, 0);
   const realMs = Math.max(elapsedMs - measuredMs, 0);
@@ -1328,8 +1335,12 @@ renderer.setAnimationLoop((now) => {
       // Reached, or nothing will move it further: an ended run, or a paused one.
       if (clock.left <= 0 || (!movable() && run?.compiling !== true)) clock.reached();
     }
-    replayFrames += 1;
-    redraw ||= replayFrames % BOT_DRAW_EVERY === 0;
+    // Only a frame that stepped counts toward the next picture: a clock nobody advances draws
+    // nothing, as a held game does.
+    if (dt > 0) {
+      replayFrames += 1;
+      redraw ||= replayFrames % BOT_DRAW_EVERY === 0;
+    }
   } else if (run?.bot !== undefined && nativeNow.call(performance) > run.bot.wallUntil) {
     // A page too slow for the bot's budget, or a game that paused itself: it ends on wall time.
     botBudgetEnds(run);
@@ -1387,19 +1398,37 @@ renderer.setAnimationLoop((now) => {
     if (run?.bot !== undefined && run.time >= run.bot.until) botBudgetEnds(run);
     redraw = true;
   }
-  // A frozen frame stays on the canvas; nothing redraws until something moves.
-  const drawing = redraw && run?.compiling !== true;
+  // A frozen frame stays on the canvas; nothing redraws until something moves. A 120 Hz or
+  // faster display still steps play every frame but draws only when a draw is due, about 60 a
+  // second: each draw costs the whole GPU frame. A skipped draw stays owed (redraw stays set).
+  drawnMs += realMs;
+  drawnDt += dt;
+  const due = rate.step() > 1 / 110 || now >= nextDrawAt - DRAW_SLACK_MS;
+  const drawing = redraw && run?.compiling !== true && due;
   if (drawing) {
+    // On time, the next draw is one interval on; after a pause or a slow frame, one from now.
+    nextDrawAt =
+      now - nextDrawAt > DRAW_EVERY_MS ? now + DRAW_EVERY_MS : nextDrawAt + DRAW_EVERY_MS;
     look.update();
+    // The frame's real time is the time since the last draw: what the person saw, and what the
+    // render scale and the frame-rate fact judge the game by.
+    const shownMs = drawnMs;
+    const shownDt = drawnDt;
+    drawnMs = 0;
+    drawnDt = 0;
     look.frame(
       () => {
-        draw(dt);
+        draw(shownDt);
         bridge.overlay();
       },
-      { playing: moving && GameState.state === "playing", realMs },
+      { playing: moving && GameState.state === "playing", realMs: shownMs },
     );
-    devView.after(view()?.camera ?? null, realMs, now);
+    devView.after(view()?.camera ?? null, shownMs, now);
     redraw = false;
+  } else if (!redraw) {
+    // Nothing owed: the next draw starts its own count.
+    drawnMs = 0;
+    drawnDt = 0;
   }
   bridge.tick(dt);
   measuredMs = sceneReport.tick(dt, drawing);
