@@ -37,7 +37,7 @@ import {
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { truncate } from "@kurambit/shared/String";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
-import { namedAfterGame, titleFromFirstMessage } from "./gameChatTitle.ts";
+import { namedAfterGame, nameInBrief, titleFromFirstMessage } from "./gameChatTitle.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -255,10 +255,13 @@ const make = Effect.gen(function* () {
    * the title a player sees. The game waits for it, because the name goes into its folder,
    * game.json, BRIEF.md and the page's title, which the agent reads from its first second: a name
    * that arrived later would leave the drafted one in all of them. A slow or failing model leaves
-   * the drafted name, so a new game never fails over its name.
+   * the drafted name, so a new game never fails over its name. A brief that names its game keeps
+   * that name, without asking the model.
    */
   const nameFromBrief = (brief: string, drafted: string) =>
     Effect.gen(function* () {
+      const named = nameInBrief(brief);
+      if (named !== null) return named;
       const settings = yield* serverSettings.getSettings;
       const generated = yield* textGeneration.generateGameName({
         cwd: NodeOS.homedir(),

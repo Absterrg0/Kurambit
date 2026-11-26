@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { FIRST_TURN_LEADS } from "@kurambit/shared/gameFirstTurn";
 
-import { titleFromFirstMessage } from "./gameChatTitle.ts";
+import { nameInBrief, titleFromFirstMessage } from "./gameChatTitle.ts";
 
 const gameNames = ["Stillwater", "Can You Please"];
 const from = (title: string, firstMessage: string | null) =>
@@ -37,5 +37,22 @@ describe("titleFromFirstMessage", () => {
     assert.strictEqual(from("Stillwater", "Slow the sun"), "Slow the sun");
     assert.isNull(from("Slow the sun", "Slow the sun"));
     assert.isNull(from("Stillwater", "Stillwater\n\n"));
+  });
+});
+
+describe("nameInBrief", () => {
+  it("reads the name a brief gives its game, and no other", () => {
+    assert.strictEqual(
+      nameInBrief("A calm 3D puzzle game called Prism Isles (light-beam puzzle) where you…"),
+      "Prism Isles",
+    );
+    assert.strictEqual(nameInBrief("A twin-stick game called Hive Breaker, bees."), "Hive Breaker");
+    assert.strictEqual(
+      nameInBrief('It\'s called "the long dark of Ys". Make it.'),
+      "the long dark of Ys",
+    );
+    assert.strictEqual(nameInBrief("A game named Tower of the Moon."), "Tower of the Moon");
+    assert.strictEqual(nameInBrief("A platformer where a fox called Rusty runs."), null);
+    assert.strictEqual(nameInBrief("A cozy fishing game on a lake."), null);
   });
 });
