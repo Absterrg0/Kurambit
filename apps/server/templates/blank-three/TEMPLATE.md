@@ -10,8 +10,9 @@ a running stand-in, so the Stage shows a frame at once. This is all the bridge n
    moves it each fixed step. Build the run in `start`, never at the module's top level; set
    `ctx.player`. `stop(ctx)` undoes what `start` did outside `ctx`.
 2. **An end.** `GameState.win(text)` and `GameState.lose(text)`, with `GameState` imported from
-   `./shell/run-state.js`. Plain values the game puts on `GameState` are what the harness reads,
-   and each run starts from their first values again.
+   `./shell/run-state.js`, end the run: `GameState.state` is `"ended"`, update keeps running and
+   the game shows its own ending. Plain values the game puts on `GameState` are what the harness
+   reads, and each run starts from their first values again.
 3. **The run's moves.** A run opens in play; a game that wants its own title calls
    `GameState.title()` in `start` to hold the run on it (`GameState.state` is `"title"`;
    update keeps running); `GameState.play()` starts a fresh run
