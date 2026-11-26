@@ -736,53 +736,37 @@ const make = Effect.gen(function* () {
             ...(runtime === null ? {} : { runtime }),
           };
         }
-        // An agent's final game_check of these very files is this build's boot check and saved
-        // plays' replay (GameEngine.finalCheckOf): the measure takes them and plays neither again.
-        const checked =
-          tiers.has("boots") || tiers.has("replays") ? yield* engines.finalCheckOf(copy) : null;
         if (tiers.has("boots")) {
-          const facts =
-            checked !== null
-              ? {
-                  boots: bootsFact(checked, "from game_check on the same files"),
-                  qa: qaFact(checked),
-                  screens: yield* keepScreenFrames(root, copy, key, screensFact(checked)),
-                  player: playerFact(checked),
-                }
-              : yield* step(engines.checkIn(copy, OWNER)).pipe(
-                  Effect.flatMap((result) =>
-                    Effect.map(
-                      keepScreenFrames(root, copy, key, screensFact(result)),
-                      (screens) => ({
-                        boots: bootsFact(result),
-                        qa: qaFact(result),
-                        screens,
-                        player: playerFact(result),
-                      }),
-                    ),
-                  ),
-                  Effect.catchTags({
-                    GameOperationError: (error) => {
-                      const fault = faultOf(error);
-                      return Effect.succeed({
-                        boots: fault ?? {
-                          status: "measured" as const,
-                          value: {
-                            ok: false,
-                            detail: (error.detail ?? error.reason).slice(0, 300),
-                          },
-                        },
-                        qa: fault ?? notMeasured("the boot check failed before the QA play", false),
-                        screens:
-                          fault ??
-                          notMeasured("the boot check failed before the other screen sizes", false),
-                        player:
-                          fault ??
-                          notMeasured("the boot check failed before the first minute", false),
-                      });
+          const facts = yield* step(engines.checkIn(copy, OWNER)).pipe(
+            Effect.flatMap((result) =>
+              Effect.map(keepScreenFrames(root, copy, key, screensFact(result)), (screens) => ({
+                boots: bootsFact(result),
+                qa: qaFact(result),
+                screens,
+                player: playerFact(result),
+              })),
+            ),
+            Effect.catchTags({
+              GameOperationError: (error) => {
+                const fault = faultOf(error);
+                return Effect.succeed({
+                  boots: fault ?? {
+                    status: "measured" as const,
+                    value: {
+                      ok: false,
+                      detail: (error.detail ?? error.reason).slice(0, 300),
                     },
-                  }),
-                );
+                  },
+                  qa: fault ?? notMeasured("the boot check failed before the QA play", false),
+                  screens:
+                    fault ??
+                    notMeasured("the boot check failed before the other screen sizes", false),
+                  player:
+                    fault ?? notMeasured("the boot check failed before the first minute", false),
+                });
+              },
+            }),
+          );
           yield* write(facts);
         }
         // The harness's own masher, fresh from the server's templates, never the game's.
@@ -822,35 +806,28 @@ const make = Effect.gen(function* () {
           // Each replay is announced as it starts: a bring-in's check counts them for the person.
           const of = Math.min(saved.plays.length, SAVED_PLAYS_PER_BUILD);
           let replaying = 0;
-          const replayed =
-            checked?.savedPlays?.status === "measured" &&
-            checked.savedPlays.reading.set === saved.set
-              ? checked.savedPlays.reading
-              : null;
           yield* write({
             savedPlays:
               saved.plays.length === 0
                 ? NONE_SAVED
-                : replayed !== null
-                  ? { status: "measured", value: replayed }
-                  : (unstarted ??
-                    (yield* replaySavedPlays(saved, (play) =>
-                      announce(
-                        `Build ${build.build.slice(0, 8)}: test play ${(replaying += 1)} of ${of}.`,
-                      ).pipe(Effect.andThen(step(engines.replayIn(copy, play)))),
-                    ).pipe(
-                      Effect.map((value) => ({ status: "measured" as const, value })),
-                      Effect.catchTags({
-                        GameOperationError: (error) =>
-                          Effect.succeed(
-                            faultOf(error) ??
-                              notMeasured(
-                                `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
-                                false,
-                              ),
-                          ),
-                      }),
-                    ))),
+                : (unstarted ??
+                  (yield* replaySavedPlays(saved, (play) =>
+                    announce(
+                      `Build ${build.build.slice(0, 8)}: test play ${(replaying += 1)} of ${of}.`,
+                    ).pipe(Effect.andThen(step(engines.replayIn(copy, play)))),
+                  ).pipe(
+                    Effect.map((value) => ({ status: "measured" as const, value })),
+                    Effect.catchTags({
+                      GameOperationError: (error) =>
+                        Effect.succeed(
+                          faultOf(error) ??
+                            notMeasured(
+                              `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
+                              false,
+                            ),
+                        ),
+                    }),
+                  ))),
           });
         }
         yield* Deferred.succeed(booted, undefined);

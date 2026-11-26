@@ -244,7 +244,7 @@ check that matters.
   the model.
 - A hero's gates are measured numbers (`gates.py`, `deform.py`), taken in the one-shot pass before
   the style pass joins the meshes (clothing and body must still be told apart) and scaled to the
-  shipped size; a failing one is a refusal, and the sidecar and `game_check` op `final` carry them.
+  shipped size; a failing one is a refusal, and the sidecar carries them.
   Every limit is set from what the library's own clips do on its own base body, so a gate fails
   what is broken rather than what linear blend skinning always does (a T-posed shoulder stretches
   about 3x). Height leaves out what a hand holds and what dangles (a rod raised overhead, a tail
@@ -552,10 +552,10 @@ hand has no stamp, so only fresh sessions read it.
   A reason that changes what a person is told or what the harness does next carries a `cause`
   literal beside `why`; the client words the cause and the harness branches on it, and neither
   reads meaning out of `why`, which is the agents' text and free to change.
-- **Facts skip what is already known or not needed.** The boot check and the saved plays'
-  replay are not run again when this server's own final `game_check` (op `final`, the one that
-  also plays the scene report and the QA play) took them on the same bytes (engine folder and
-  `game.json`), clean or not: an agent's final on a turn's last files is that build's measure.
+- **One full check per build, after the turn.** The build's measure is the only full check (boot,
+  QA play, first minute, saved plays); an agent's `game_check`, op `final` included, is a quick
+  look. A full check inside the turn held the agent most of a minute, and the build paid it again
+  whenever the agent edited after it. Its problems reach the agent in the next turn's note.
 - **A restore commits, then moves.** Undo, Redo, Go back and a landing commit their restore
   (`game-build.restore`; a landing's build in the same commit) and the folder's moves
   (`withBuildInFolder`, under the `game-builds` run-ref folder) run as that record's outbox
@@ -608,8 +608,7 @@ cannot both find none.
   asset counts were cut: nobody acted on them, and the plays cost minutes between steps.
 - **Nothing between steps waits on a play.** The look reads the facts measured on the folder's
   build so far, so step 1 starts at once from the newest `Next:`. The judge waits only for the
-  boot check and the QA play (`upTo: "boots"`), usually the step's own final `game_check` on the
-  same files; the random-input play goes on behind the next step. While the current build's play
+  boot check and the QA play (`upTo: "boots"`); the random-input play goes on behind the next step. While the current build's play
   has no reading yet (queued, playing, or dropped for a newer build), the look also reads the build it was made from (`earlier`), so an error that
   play found there is the next blocker rather than an undo. **The look reads the folder's build.** The current build is the newest turn build that changed
   game files, or a later kept edit or restore target; turns that changed only notes are no builds,

@@ -12,75 +12,24 @@ const issueLine = (issue: Answer) =>
     .filter((part) => part !== "")
     .join(" at ");
 
-/**
- * The first minute in one line: the readings off their line, then how many held and which were
- * not measured. Every reading is in the details' `player.lines`.
- */
-const firstMinute = (answer: Answer): ReadonlyArray<string> => {
-  const stage =
-    typeof answer.stageMinutes === "number"
-      ? [`Stage first moved ${answer.stageMinutes.toFixed(1)} min after the brief`]
-      : [];
-  if (answer.player?.status !== "measured")
-    return answer.player?.status === "not-measured"
-      ? [`first minute: not measured (${answer.player.why})`]
-      : [];
-  const lines: ReadonlyArray<string> = answer.player.lines ?? [];
-  const off = lines.filter((line) => line.endsWith(" ✗"));
-  const held = lines.filter((line) => line.endsWith(" ✓")).length;
-  const unmeasured = [
-    ...(stage.length === 0 ? ["Stage first moved"] : []),
-    ...lines.filter((line) => line.includes(": not measured")).map((line) => line.split(":")[0]),
+/** A look's verdict; a final is a look with the status line. */
+const check = (answer: Answer): Verdict => {
+  const errors: ReadonlyArray<Answer> = answer.errors ?? [];
+  const numbers = [
+    answer.ok === true ? "boots" : "does not boot",
+    `${errors.length} error${errors.length === 1 ? "" : "s"}`,
+    ...(typeof answer.performance === "string" ? [answer.performance] : []),
+    ...(answer.status === undefined ? [] : [answer.status]),
   ];
-  return [
-    [
-      `first minute: ${held} on their line, ${off.length} off`,
-      ...stage,
-      ...off.map((line) => line.replace(/ ✗$/, "")),
-      ...(unmeasured.length === 0 ? [] : [`not measured: ${unmeasured.join(", ")}`]),
-    ].join(" · "),
-  ];
-};
-
-const check =
-  (final: boolean) =>
-  (answer: Answer): Verdict => {
-    const errors: ReadonlyArray<Answer> = answer.errors ?? [];
-    const qa: ReadonlyArray<string> =
-      answer.qa?.status === "measured" ? (answer.qa.problems ?? []) : [];
-    const screens: ReadonlyArray<string> =
-      answer.screens?.status === "measured" ? (answer.screens.problems ?? []) : [];
-    const scene: ReadonlyArray<string> =
-      answer.scene?.status === "measured" ? (answer.scene.lines ?? []) : [];
-    const problems = [...qa, ...screens];
-    const numbers = [
-      answer.ok === true ? "boots" : "does not boot",
-      `${errors.length} error${errors.length === 1 ? "" : "s"}`,
-      ...(final ? [`${problems.length} QA problem${problems.length === 1 ? "" : "s"}`] : []),
-      ...(typeof answer.performance === "string" ? [answer.performance] : []),
-      ...(answer.status === undefined ? [] : [answer.status]),
-    ];
-    const next = errors.length > 0 ? "fix the first error where it points." : undefined;
-    return {
-      line: numbers.join(" · "),
-      findings: [...errors.map(issueLine), ...problems, ...(final ? scene : [])],
-      notes: [
-        ...(final ? firstMinute(answer) : []),
-        ...(typeof answer.fresh === "string" ? answer.fresh.split("\n") : []),
-      ],
-      ...(next === undefined ? {} : { next }),
-      said: [
-        "errors",
-        "performance",
-        "qa.problems",
-        "screens.problems",
-        "scene.lines",
-        "player.report",
-        "stageMinutes",
-        "fresh",
-      ],
-    };
+  const next = errors.length > 0 ? "fix the first error where it points." : undefined;
+  return {
+    line: numbers.join(" · "),
+    findings: errors.map(issueLine),
+    notes: typeof answer.fresh === "string" ? answer.fresh.split("\n") : [],
+    ...(next === undefined ? {} : { next }),
+    said: ["errors", "performance", "fresh"],
   };
+};
 
 const outcome = (play: Answer | null | undefined) =>
   play == null
@@ -88,8 +37,8 @@ const outcome = (play: Answer | null | undefined) =>
     : `${play.left === true ? "left" : play.won === true ? "won" : "lost"} at ${num(play.seconds)} s`;
 
 const VERDICTS: Readonly<Record<string, (answer: Answer) => Verdict>> = {
-  "game_check.look": check(false),
-  "game_check.final": check(true),
+  "game_check.look": check,
+  "game_check.final": check,
   "game_play.act": (answer) => ({
     line: `${num(answer.nominalMs)} ms of play${
       answer.probe?.gameState?.state === undefined ? "" : ` · state ${answer.probe.gameState.state}`

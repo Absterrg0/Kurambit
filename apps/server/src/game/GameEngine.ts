@@ -7,7 +7,6 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
@@ -27,7 +26,6 @@ import {
   type GameProcessResult,
   type GamePlay,
   type GameReplayRun,
-  savedPlaysWords,
   type GameModelSheetInput,
   type GameModelSheetResult,
   GamePicturesInput,
@@ -47,13 +45,11 @@ import { type GameEngineProfile, type GameExportTarget } from "./engineProfile.t
 import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./checkIssues.ts";
 import { HERO_KINDS, keepHeroSheet } from "./heroSheets.ts";
-import { hashFile } from "./hashFile.ts";
 import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import { gameReference } from "./gameReference.ts";
 import { readGameStyle } from "./gameStyle.ts";
 import { renderPictures } from "./pictures.ts";
 import type { SheetView } from "./webPlaySession.ts";
-import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
 /**
  * How an agent judges a model sheet, carried by the sheet's own result so it arrives exactly
@@ -83,9 +79,6 @@ const referenceViews = (view?: {
     },
   ];
 };
-
-/** Final checks kept for builds' facts: a turn's last few checks are the ones its build may match. */
-const FINAL_CHECKS = 32;
 
 export interface GameEngineBinary {
   readonly path: string;
@@ -291,19 +284,15 @@ export class GameEngine extends Context.Service<
     /** `game_assets` op `import`: the engine's import of the thread's game, as the game's operation. */
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
-     * The game's boot check, as the thread's game's operation (`owner` names
-     * whose work it is, the thread by default), holding the live editor itself.
-     * Everything the game did is in the result (a failed import, an entry that
-     * does not load, a freeze, compile errors); it fails only when the check
-     * could not be made: a tool or the machine. Without `final` it is a quick look (see
-     * GameEngineBackend.runCheck); a final check also boots every entry and plays the scene
-     * report and the QA play, once per state of the files: a final check of files a clean
-     * final check already played answers with that check (one that found a problem runs again).
+     * The agent's quick look at the thread's game (GameEngineBackend.runCheck), as the thread's
+     * game's operation (`owner` names whose work it is, the thread by default). Everything the
+     * game did is in the result (a failed import, an entry that does not load, a freeze, compile
+     * errors); it fails only when the check could not be made: a tool or the machine. The full
+     * check is the build's measure after the turn (checkIn), never run twice for one build.
      */
     readonly check: (
       threadId: ThreadId,
       owner?: string,
-      options?: { readonly final?: boolean },
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
     /**
      * The boot check of a checkout no thread owns (a build's copy), as its own
@@ -313,14 +302,6 @@ export class GameEngine extends Context.Service<
       root: string,
       owner: string,
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
-    /**
-     * The last final `check` this server made of the very files `root` holds (its
-     * engine project and game.json, byte for byte), clean or not, with the saved plays it
-     * replayed; or null. That check booted the same entries and played the gameplay entry
-     * longer, so it is the copy's boot check: an agent's final on a turn's last files is
-     * that build's measure, never run again after the turn.
-     */
-    readonly finalCheckOf: (root: string) => Effect.Effect<GameCheckResult | null>;
     /**
      * A person's kept play run again on the game at `root` (its folder or a build's copy);
      * refused for an engine or a shell with no replay.
@@ -534,42 +515,6 @@ const make = Effect.gen(function* () {
     return yield* backend.viewport(yield* inGame(root, manifest.project));
   });
 
-  // Final checks by the identity of what they checked. Memory only: one lost costs a boot check.
-  // Entries are only set, never looked up: getOption reads without calling lookup.
-  const finalChecks = yield* Cache.make({
-    lookup: (_identity: string): Effect.Effect<GameCheckResult> =>
-      Effect.die("final checks are only set"),
-    capacity: FINAL_CHECKS,
-  });
-  /** The engine project's files and game.json, by content; null when they cannot be read whole. */
-  const checkedIdentity = (root: string) =>
-    Effect.gen(function* () {
-      const manifest = yield* projects.read(root);
-      const snapshot = yield* identify(root, manifest.project);
-      if (snapshot.kind !== "known") return null;
-      const manifestHash = yield* Effect.promise(() =>
-        hashFile(NodePath.join(root, "game.json"), { noFollow: true }),
-      );
-      return `${manifest.engine.name}:${snapshot.sourceId}:${manifestHash.sha256}`;
-    }).pipe(Effect.orElseSucceed(() => null));
-  /**
-   * The thread's check: a quick look, or a final check remembered when its files held still
-   * throughout. A look leaves out the scene report and the QA play, so only a final check stands
-   * for a build's boot check (finalCheckOf). Only a clean one answers the agent's next final: one
-   * that found a problem runs again, since a slow boot or a timing may not repeat.
-   */
-  const checkRemembered = (final: boolean) => (root: string) =>
-    Effect.gen(function* () {
-      const before = yield* checkedIdentity(root);
-      if (final && before !== null) {
-        const played = yield* Cache.getOption(finalChecks, before);
-        if (Option.isSome(played) && played.value.ok) return played.value;
-      }
-      const result = yield* check(root, final ? { scene: true, qa: true } : { look: true });
-      if (final && before !== null && before === (yield* checkedIdentity(root)))
-        yield* Cache.set(finalChecks, before, result);
-      return result;
-    });
   const checkLabel = (root: string) =>
     Effect.map(
       projects.read(root),
@@ -601,70 +546,18 @@ const make = Effect.gen(function* () {
         );
       return run;
     });
-  // A final check replays the game's saved plays on the folder, once per state of the files
-  // and of the saved plays: the last reading per game.
-  const replayedSaved = new Map<
-    string,
-    { key: string; savedPlays: NonNullable<GameCheckResult["savedPlays"]> }
-  >();
-  const savedPlaysOn = (root: string) =>
-    Effect.gen(function* () {
-      const saved = yield* Effect.promise(() =>
-        savedPlays(root).catch(() => ({ plays: [], set: "" })),
-      );
-      if (saved.plays.length === 0) return {};
-      const identity = yield* checkedIdentity(root);
-      const key = identity === null ? null : `${identity}:${saved.set}`;
-      const known = replayedSaved.get(root);
-      // The final check of the same files carries its replays, so a build's measure takes both.
-      const attach = (savedPlays: NonNullable<GameCheckResult["savedPlays"]>) =>
-        identity === null
-          ? Effect.void
-          : Effect.flatMap(Cache.getOption(finalChecks, identity), (final) =>
-              Option.isSome(final)
-                ? Cache.set(finalChecks, identity, { ...final.value, savedPlays })
-                : Effect.void,
-            );
-      if (key !== null && known !== undefined && known.key === key) {
-        yield* attach(known.savedPlays);
-        return { savedPlays: known.savedPlays };
-      }
-      const reading: NonNullable<GameCheckResult["savedPlays"]> = yield* replaySavedPlays(
-        saved,
-        (play) => replayIn(root, play),
-      ).pipe(
-        Effect.map((value) => ({
-          status: "measured" as const,
-          text: savedPlaysWords(value),
-          reading: value,
-        })),
-        Effect.catchTags({
-          GameOperationError: (error) =>
-            Effect.succeed({
-              status: "not-measured" as const,
-              why: `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
-            }),
-        }),
-      );
-      if (key !== null) replayedSaved.set(root, { key, savedPlays: reading });
-      yield* attach(reading);
-      return { savedPlays: reading };
-    });
   return GameEngine.of({
     backendFor,
     context,
     importProject,
     import: (threadId) => projects.exclusive(threadId, "Import", importProject),
-    check: (threadId, owner, options) =>
+    check: (threadId, owner) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const label = yield* checkLabel(root);
-        const final = options?.final === true;
-        const result = yield* projects.exclusive(threadId, label, checkRemembered(final), {
+        return yield* projects.exclusive(threadId, label, (root) => check(root, { look: true }), {
           owner,
         });
-        if (!final) return result;
-        return { ...result, ...(result.ok ? yield* savedPlaysOn(root) : {}) };
       }),
     checkIn: (root, owner) =>
       Effect.flatMap(checkLabel(root), (label) =>
@@ -762,12 +655,6 @@ const make = Effect.gen(function* () {
                 : `${review} Kept as hero sheets: ${kept.join(", ")}. Write each one's critique beside it (${kept.map((sheet) => sheet.replace(/\.png$/, ".md")).join(", ")}).`,
           };
         }),
-      ),
-    finalCheckOf: (root) =>
-      Effect.flatMap(checkedIdentity(root), (identity) =>
-        identity === null
-          ? Effect.succeed(null)
-          : Effect.map(Cache.getOption(finalChecks, identity), Option.getOrNull),
       ),
     toolStatus,
     viewport,

@@ -2,7 +2,6 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type * as Context from "effect/Context";
-import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import { LRUCache } from "lru-cache";
 import * as Schema from "effect/Schema";
@@ -22,7 +21,6 @@ import {
   GameBlenderPaintResult,
   GameBlenderSceneResult,
   GameBuildFacts,
-  type GameBuild,
   GameBuildRestoreResult,
   GameBuildUndoResult,
   GameBringInResult,
@@ -49,7 +47,6 @@ import {
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
-import { CheckpointStore } from "../../../checkpointing/CheckpointStore.ts";
 import * as GameCopies from "../../../game/GameCopies.ts";
 import * as GamePlays from "../../../game/GamePlays.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
@@ -196,8 +193,6 @@ const GameCheckAnswer = Schema.Struct({
   screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
   /** Which picture is the reference, once per session, when the game has one. */
   review: Schema.optionalKey(Schema.String),
-  /** Minutes from the game's creation to the first build (or this check) that moved. */
-  stageMinutes: Schema.optionalKey(Schema.Number),
   /** With fresh: a separate model's view of the frames' biggest visible problems. */
   fresh: Schema.optionalKey(Schema.String),
 });
@@ -208,76 +203,24 @@ const png = (bytes: Buffer) => ({
   ...THREE_VIEWPORT,
 });
 
-/** The builds read for the first one that moved: a game's opening, never its whole history. */
-const STAGE_BUILDS = 20;
-const TURN_REFS = "refs/kurambit/orchestration-v2/checkpoints/";
-/** A turn's end capture; ordinal 0 is the capture before a chat's first turn. */
-const ENDED_TURN = /\/ordinal\/[1-9]\d*$/;
-/**
- * Minutes from the brief (the game's repository created) to the Stage first moving: the oldest
- * build whose first minute measured a moving frame, or this check's when no build moved yet. Its
- * builds are made at turn ends, so this is the latest it can have moved, never sooner. Undefined
- * when its earliest builds were not measured moving (made before the first minute was measured),
- * or when its turns were made somewhere this server never listed.
- */
-const stageMinutes = (store: CheckpointStore["Service"], root: string, moves: boolean) =>
-  Effect.gen(function* () {
-    const born = yield* Effect.promise(() =>
-      NodeFSP.stat(NodePath.join(root, ".git")).then(
-        (stat) => (stat.birthtimeMs > 0 ? stat.birthtimeMs : null),
-        () => null,
-      ),
-    );
-    if (born === null) return undefined;
-    const oldest: Array<GameBuild> = [];
-    let before: string | undefined;
-    for (let page = 0; page < 20; page += 1) {
-      const listed = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-        builds.list(threadId, { before, limit: 100 }),
-      );
-      oldest.unshift(...listed.builds.toReversed());
-      if (listed.next === null) break;
-      before = listed.next;
-    }
-    for (const build of oldest.slice(0, STAGE_BUILDS)) {
-      const facts = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-        builds.facts(threadId, { _tag: "build", build: build.id }),
-      );
-      // A build stored before the first minute was measured may have moved; when is unknown.
-      if (facts.player.status === "not-measured" && facts.player.retry) return undefined;
-      if (facts.player.status !== "measured") continue;
-      if (facts.player.value.moves === true) return (Date.parse(build.at) - born) / 60_000;
-    }
-    if (oldest.length > 0 || !moves) return undefined;
-    // No build listed is a game's first turn only when its folder holds no ended turn either: a
-    // game whose turns were made in another install (imported, copied in) would read its whole age.
-    const turns = yield* store.listCheckpointRefs({ cwd: root, prefix: TURN_REFS });
-    if (turns.some((ref) => ENDED_TURN.test(ref.checkpointRef))) return undefined;
-    const now = yield* Clock.currentTimeMillis;
-    return (now - born) / 60_000;
-  }).pipe(Effect.orElseSucceed(() => undefined));
-
 /**
  * A check, with its views as images: the agent sees its game before it ends the turn. When the
  * game has a reference picture, play's frame comes stacked above it at the same size, every check:
  * matching a picture is a loop of looks, and each look needs both.
  */
-const check = (store: CheckpointStore["Service"], final: boolean, fresh = false) =>
+const check = (fresh: boolean) =>
   Effect.gen(function* () {
     const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
-      engines.check(threadId, undefined, { final }),
+      engines.check(threadId),
     );
     const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
       projects.resolve(threadId),
     );
-    const moved = result.player?.status === "measured" && result.player.report.moves === true;
-    const minutes = final ? yield* stageMinutes(store, root, moved) : undefined;
-    const measured = minutes === undefined ? result : { ...result, stageMinutes: minutes };
     const views = result.views ?? [];
     if (views.length === 0)
       return fresh
-        ? { ...measured, fresh: "Fresh eyes need a frame, and this check made none." }
-        : measured;
+        ? { ...result, fresh: "Fresh eyes need a frame, and this check made none." }
+        : result;
     const reference = yield* gameReference(root);
     // As an act's frame, the small JPEG beside the view; the full PNG when it is stacked on the
     // reference, which needs both at one size.
@@ -325,7 +268,7 @@ const check = (store: CheckpointStore["Service"], final: boolean, fresh = false)
     // A brief alone needs no words beside the frames; a reference says which picture is which.
     const review = shown.length > 0 && reference !== null && firstReview(session);
     return {
-      ...measured,
+      ...result,
       ...(shown.length === 0 ? {} : { screenshots: shown }),
       ...(seen === undefined ? {} : { fresh: seen }),
       ...(review
@@ -351,35 +294,32 @@ const statusLine = Effect.gen(function* () {
   ].join(" · ");
 });
 
-const checkHandlers = (store: CheckpointStore["Service"]) =>
-  ({
-    game_check: McpToolAccess.actsAsCaller(({ includeImage, ...input }) =>
-      dispatch(
-        "game_check",
-        input,
-        {
-          look: (look) => check(store, false, look?.fresh === true),
-          // The critique is read back from this call's input by keep going (GameRunStepRunner).
-          final: () =>
-            check(store, true).pipe(
-              Effect.flatMap((answer) =>
-                statusLine.pipe(
-                  Effect.map((status) => ({ ...(answer as object), status })),
-                  Effect.orElseSucceed(() => answer),
-                ),
+const checkHandlers = {
+  game_check: McpToolAccess.actsAsCaller(({ includeImage, ...input }) =>
+    dispatch(
+      "game_check",
+      input,
+      {
+        look: (look) => check(look?.fresh === true),
+        // The turn's last look, with its critique and the status line. The full check is the
+        // build's measure after the turn alone: run inside the turn too, it held the agent for
+        // most of a minute and ran again whenever the agent edited after it. Keep going reads
+        // the critique back from this call's input (GameRunStepRunner).
+        final: () =>
+          check(false).pipe(
+            Effect.flatMap((answer) =>
+              statusLine.pipe(
+                Effect.map((status) => ({ ...(answer as object), status })),
+                Effect.orElseSucceed(() => answer),
               ),
             ),
-        },
-        "look",
-      ).pipe(Effect.map(pictured(includeImage))),
-    ),
-  }) satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
-export const layerCheck = McpToolAccess.toLayer(
-  GameCheckToolkit,
-  Effect.gen(function* () {
-    return checkHandlers(yield* CheckpointStore);
-  }),
-);
+          ),
+      },
+      "look",
+    ).pipe(Effect.map(pictured(includeImage))),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
+export const layerCheck = McpToolAccess.toLayer(GameCheckToolkit, checkHandlers);
 
 /** Named models drawn from every side, with the reference picture after them, as images. */
 const modelSheet = (input: Parameters<GameEngine.GameEngine["Service"]["modelSheet"]>[1]) =>

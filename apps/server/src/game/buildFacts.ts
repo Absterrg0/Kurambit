@@ -290,14 +290,12 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
  * The engine check of a build's copy as a fact, worded as the run's boot check
  * words it; `source` names a check made elsewhere of the same files.
  */
-export const bootsFact = (result: GameCheckResult, source?: string): Facts["boots"] => ({
+export const bootsFact = (result: GameCheckResult): Facts["boots"] => ({
   status: "measured",
   value: {
     ok: result.ok,
     detail: result.ok
-      ? source === undefined
-        ? "boot clean"
-        : `boot clean (${source})`
+      ? "boot clean"
       : `check failed: ${
           result.errors
             .slice(0, 3)

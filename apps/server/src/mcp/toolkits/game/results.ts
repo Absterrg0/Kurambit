@@ -14,7 +14,6 @@ export const REFUSAL_MOST = 300;
 /** Bytes of text an op answers with, images aside: TOOLS.md's targets, ≤2 KB unless named. */
 const DEFAULT_CAP = 2_048;
 const CAPS: Readonly<Record<string, number>> = {
-  "game_check.final": 4_096,
   "game_play.eval": 16_384,
   "game_play.model_sheet": 1_536,
   // What the agent printed from Blender: 97% of 1,283 bench answers were under 6 KB, 99% under 9.3 KB.
