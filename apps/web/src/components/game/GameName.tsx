@@ -16,8 +16,9 @@ import { toastManager } from "../ui/toast";
 import { useGameLibraryRefresh } from "./useGameLibrary";
 
 /**
- * A game's name is its project's title. game.json keeps the name the game was
- * created with, so renaming never touches the game's files or its next build.
+ * A game's name is its project's title. The server writes a rename into the game's files too
+ * (GameProjectService.named): an export's tab, Publish and the folder opened elsewhere read
+ * game.json and the page, and showed the old name. Its next build carries that one-line change.
  */
 export function useGameName(
   environmentId: EnvironmentId,

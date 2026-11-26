@@ -1776,6 +1776,8 @@ const layerWsRpc = (
         const result = yield* projectMutationOperation(projectService, mutation);
         if (mutation.type === "project.delete")
           yield* projectCloneTracker.discard(mutation.projectId);
+        if (mutation.type === "project.update" && mutation.title !== undefined)
+          yield* gameProjects.named(result.workspaceRoot, result.title);
         return result;
       });
 

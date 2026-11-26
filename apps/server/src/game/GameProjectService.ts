@@ -181,6 +181,13 @@ export class GameProjectService extends Context.Service<
       choice: { readonly route?: GameCharacterRoute; readonly library?: boolean },
     ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
     /**
+     * The name a person gave the game (its project's title) where its files carry the name it
+     * had: game.json, which a copy of the folder elsewhere and Publish read, and the page's and
+     * the brief's title where they still read the old name. Text the agent wrote stays its own.
+     * Not the folder: its path is the game's identity. A folder that is no game is left alone.
+     */
+    readonly named: (workspaceRoot: string, name: string) => Effect.Effect<void>;
+    /**
      * A game's worktrees (a copy, a delegated child's, a handoff's) are seated on its folder's
      * files, never on HEAD, which in a game is the empty scaffold: T3's `worktreeSeed`.
      */
@@ -398,6 +405,73 @@ const make = Effect.gen(function* () {
             NO_IDS,
           ),
       }),
+    );
+  /** game.json with `change` made to it; every key the change leaves stays as it was read. */
+  const writeManifest = (
+    root: string,
+    operation: string,
+    change: (raw: Record<string, unknown>) => Record<string, unknown>,
+  ) =>
+    Effect.gen(function* () {
+      const file = NodePath.join(root, "game.json");
+      const failed = (reason: "io" | "invalid-project") => (cause: unknown) =>
+        new GameOperationError({ operation, path: file, reason, cause });
+      const text = yield* Effect.tryPromise({
+        try: () => NodeFSP.readFile(file, "utf8"),
+        catch: failed("io"),
+      });
+      const raw = yield* decodeManifestObject(text).pipe(
+        Effect.mapError(failed("invalid-project")),
+      );
+      yield* writeFileStringAtomically({
+        filePath: file,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
+        contents: `${JSON.stringify(change(raw), null, 2)}\n`,
+        followLink: false,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.mapError(failed("io")),
+      );
+    });
+  /** The file's first `from`, the scaffold's mention of the old name, as `to`; else untouched. */
+  const renameIn = (file: string, from: string, to: string) =>
+    Effect.tryPromise(() => NodeFSP.readFile(file, "utf8")).pipe(
+      Effect.flatMap((text) =>
+        text.includes(from)
+          ? writeFileStringAtomically({
+              filePath: file,
+              contents: text.replace(from, () => to),
+              followLink: false,
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            )
+          : Effect.void,
+      ),
+    );
+  const named = (workspaceRoot: string, name: string) =>
+    Effect.gen(function* () {
+      const game = yield* Effect.tryPromise(() => realGameRoot(workspaceRoot)).pipe(
+        Effect.flatMap((root) => Effect.map(read(root), (manifest) => ({ root, manifest }))),
+        Effect.option,
+      );
+      if (Option.isNone(game) || game.value.manifest.name === name) return;
+      const { root, manifest } = game.value;
+      const old = manifest.name;
+      yield* writeManifest(root, "rename-game", (raw) => ({ ...raw, name }));
+      // The scaffold writes the name as it is; a new one is escaped, so it cannot end the title.
+      const html = name.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+      yield* renameIn(
+        NodePath.join(root, manifest.project, "index.html"),
+        `<title>${old}</title>`,
+        `<title>${html}</title>`,
+      );
+      yield* renameIn(NodePath.join(root, "BRIEF.md"), `# ${old}\n`, `# ${name}\n`);
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("The game's files keep their old name.", { workspaceRoot, cause }),
+      ),
     );
   const register = Effect.fnUntraced(function* (
     root: string,
@@ -885,8 +959,7 @@ const make = Effect.gen(function* () {
             const summary: GameSummary = {
               projectId: project.id,
               root,
-              // The project's title is the name the person sees and renames;
-              // game.json keeps the name the game was created with.
+              // The project's title is the name the person sees and renames; game.json follows it.
               name: project.title,
               template: manifest.value.template ?? null,
               operation:
@@ -935,6 +1008,7 @@ const make = Effect.gen(function* () {
       ),
     resolve,
     read,
+    named,
     exclusive: (threadId, name, work, options) =>
       Effect.flatMap(resolve(threadId), (root) =>
         operations.exclusive(
@@ -962,55 +1036,11 @@ const make = Effect.gen(function* () {
         const current = gameModelChoice(yield* read(root));
         const route = choice.route ?? current.route;
         const library = choice.library ?? current.library;
-        const file = NodePath.join(root, "game.json");
-        const raw = yield* Effect.tryPromise({
-          try: () => NodeFSP.readFile(file, "utf8"),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "set-characters",
-              path: file,
-              reason: "io",
-              cause,
-            }),
-        }).pipe(
-          Effect.flatMap((text) =>
-            decodeManifestObject(text).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new GameOperationError({
-                    operation: "set-characters",
-                    path: file,
-                    reason: "invalid-project",
-                    cause,
-                  }),
-              ),
-            ),
-          ),
-        );
-        yield* writeFileStringAtomically({
-          filePath: file,
-          // The code route is no key (see scaffold.ts): older installs still open the game.
-          // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
-          contents: `${JSON.stringify(
-            route === "code"
-              ? { ...Struct.omit(raw, ["characters"]), library }
-              : { ...raw, characters: route, library },
-            null,
-            2,
-          )}\n`,
-          followLink: false,
-        }).pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
-          Effect.mapError(
-            (cause) =>
-              new GameOperationError({
-                operation: "set-characters",
-                path: file,
-                reason: "io",
-                cause,
-              }),
-          ),
+        // The code route is no key (see scaffold.ts): older installs still open the game.
+        yield* writeManifest(root, "set-characters", (raw) =>
+          route === "code"
+            ? { ...Struct.omit(raw, ["characters"]), library }
+            : { ...raw, characters: route, library },
         );
         // Every client's status signal rereads on an operation push.
         yield* operations.changed(

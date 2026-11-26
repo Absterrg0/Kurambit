@@ -64,7 +64,8 @@ sidebar and the command palette bring you back to that box, and so does `mod+N` 
 a game's screen. The box grows with what you write. Under it are the agent and
 model (your last game's, else Claude) and one options button for how characters are made. New games
 are saved in `~/Games`. Kurambit names the game from your brief; rename it any time from the game's
-name above the stage, or from its card's menu on the home screen. **Start building**
+name above the stage, or from its card's menu on the home screen. The game and its exported page
+take the new name; its folder keeps the first one. **Start building**
 creates the folder and opens the game while its first build is being made, with your brief sent as
 the first message, so you see exactly what the agent was told. Your game is playable on the stage within a few minutes, on models
 from the asset library; when the library has no model of your hero or its main threat, the agent
