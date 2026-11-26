@@ -461,8 +461,15 @@ describe("the person's direction", () => {
       expect(ended.state.ending).toBe("done");
       expect(ended.state.lastFailure).toContain("your direction is done");
     }
-    const crashing = facts({ masher: tier("crashed", 12) });
-    expect(Loop.propose(finished, look({ facts: crashing }))?.why).toBe("blocker");
+    // An error only the random-input play finds (the QA play is clean) is a step, never a "done"
+    // that the Game panel's ✗ then contradicts: the look waits for that play's reading.
+    const crashing = facts({ build: BUILD, masher: tier("crashed", 12) });
+    const fixing = Loop.applyLook(finished, look({ current: BUILD, facts: crashing }));
+    expect(fixing.state.ending).toBeNull();
+    expect(fixing.plan).toMatchObject({
+      kind: "turn",
+      proposal: { why: "blocker", target: "errors" },
+    });
     // More words from the person are a direction again.
     expect(Loop.propose({ ...finished, steer: ["b"] }, look())?.why).toBe("steer");
   });

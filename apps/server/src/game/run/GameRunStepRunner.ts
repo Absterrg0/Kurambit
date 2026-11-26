@@ -162,8 +162,12 @@ const make = Effect.gen(function* () {
         ),
     );
 
-  /** The facts of a build once its boot check is in; null when they cannot be read. */
-  const factsOf = (threadId: ThreadId, build: GameBuildId | null) =>
+  /** A build's facts once its boot check (or every check) is in; null when they cannot be read. */
+  const factsOf = (
+    threadId: ThreadId,
+    build: GameBuildId | null,
+    upTo: "boots" | "all" = "boots",
+  ) =>
     build === null
       ? Effect.succeed<GameBuildFacts | null>(null)
       : builds
@@ -172,7 +176,7 @@ const make = Effect.gen(function* () {
             { _tag: "build", build },
             // The run waits on these facts as a person would: at background priority, every
             // other game's older builds measured first while the step sat queued.
-            { waitFor: FACTS_WAIT, queue: "person", upTo: "boots" },
+            { waitFor: FACTS_WAIT, queue: "person", ...(upTo === "boots" ? { upTo } : {}) },
           )
           .pipe(
             Effect.map((facts): GameBuildFacts | null => facts),
@@ -299,7 +303,17 @@ const make = Effect.gen(function* () {
       const threadId = located.run.threadId;
       const root = yield* projects.resolve(threadId);
       const { build, edited } = yield* builds.current(threadId);
-      const facts = edited ? null : yield* factsSoFar(threadId, build);
+      const records = rounds
+        .filter((r) => r.runId === located.run.id)
+        .map((r) => r.round)
+        .filter(isStepRecord);
+      // Once the direction is done this look may end the run on "no check found a problem", so it
+      // waits for the random-input play too: the judge waited only for the boot check, and an
+      // error only random play finds would show as a ✗ after the run said there was none.
+      const finished = directionFinished(located.run.steer, records);
+      const facts = edited
+        ? null
+        : yield* finished ? factsOf(threadId, build, "all") : factsSoFar(threadId, build);
       // The step build this one came from, while this one's random-input play has no reading yet
       // (queued, playing, or dropped for a newer build): an error that play found there is the
       // next blocker.
@@ -315,14 +329,10 @@ const make = Effect.gen(function* () {
       // Fresh eyes only when nothing else says what to do: the person's picture while it still
       // differs, their direction, and the agent's own `Next:` all go first, and a model call no
       // step would take is tokens spent on nothing. Once their direction is done, none would.
-      const records = rounds
-        .filter((r) => r.runId === located.run.id)
-        .map((r) => r.round)
-        .filter(isStepRecord);
       const fresh =
         (critique !== null && critique !== "none") ||
         located.run.steer.length > 0 ||
-        directionFinished(located.run.steer, records) ||
+        finished ||
         (next !== null && next !== "none")
           ? undefined
           : yield* freshLook(threadId, root);
