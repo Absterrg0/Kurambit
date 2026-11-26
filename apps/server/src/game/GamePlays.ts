@@ -176,7 +176,9 @@ const make = Effect.gen(function* () {
   const remeasure = (threadId: ThreadId, root: string) =>
     builds.current(threadId).pipe(
       Effect.flatMap((current) =>
-        current.build === null ? Effect.void : builds.measureIn(root, current.build),
+        current.build === null
+          ? Effect.void
+          : builds.measureIn(root, current.build, { supersede: true }),
       ),
       Effect.ignore,
     );

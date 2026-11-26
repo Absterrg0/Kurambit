@@ -1,5 +1,5 @@
-// Superseding drops only what nobody but a newer turn wanted: a running
-// measure, a person's and a run's always stay.
+// Superseding drops every measure of the game that nobody will look at, running or queued:
+// a person's and one somebody waits on (a keep going judge) always stay.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -26,7 +26,7 @@ const build = (n: number): GameFacts.ResolvedBuild => ({
 });
 
 describe("GameFacts supersede", () => {
-  it.effect("drops only a queued turn measure that nobody else asked for", () =>
+  it.effect("drops what nobody looks at, running or queued, and keeps what someone waits on", () =>
     Effect.gen(function* () {
       // The first measure takes the one permit and holds it: its copy never comes.
       const started = yield* Deferred.make<void>();
@@ -56,31 +56,32 @@ describe("GameFacts supersede", () => {
       yield* Effect.gen(function* () {
         const facts = yield* GameFacts.GameFacts;
         const turn = { queue: "background", supersede: true } as const;
-        const [running, dropped, personAsked, played, round, newest] = [1, 2, 3, 4, 5, 6].map(
+        const [running, queued, personAsked, judged, played, newest] = [1, 2, 3, 4, 5, 6].map(
           build,
         );
         yield* facts.measure(running!, turn);
         yield* Deferred.await(started);
-        yield* facts.measure(dropped!, turn);
-        // A person opened this turn's build while it waited.
-        yield* facts.measure(personAsked!, turn);
+        yield* facts.measure(queued!, { queue: "background" });
+        // A person opened this build while it waited.
         yield* facts.measure(personAsked!, { queue: "person" });
-        // Playing a build measures it in the background, without supersede.
-        yield* facts.measure(played!, turn);
+        // A keep going judge waits on its step's build.
+        yield* facts.measure(judged!, { queue: "background" });
+        yield* Effect.forkChild(
+          facts.measure(judged!, { queue: "background", waitFor: "1 hour", upTo: "boots" }),
+          { startImmediately: true },
+        );
+        // Playing a build measures it in the background; nobody waits on that.
         yield* facts.measure(played!, { queue: "background" });
-        yield* facts.measure(round!, { queue: "background" });
         yield* facts.measure(newest!, turn);
 
         const state = (b: GameFacts.ResolvedBuild) => Effect.map(facts.read(b), (f) => f.state);
-        assert.strictEqual(yield* state(running!), "measuring");
-        assert.strictEqual(yield* state(dropped!), "never");
-        assert.strictEqual(yield* state(personAsked!), "queued");
-        assert.strictEqual(yield* state(played!), "queued");
-        assert.strictEqual(yield* state(round!), "queued");
-        assert.strictEqual(yield* state(newest!), "queued");
-        // The dropped build owes nothing: a restart does not measure it after all.
+        for (const gone of [running!, queued!, played!])
+          assert.strictEqual(yield* state(gone), "never");
+        for (const kept of [personAsked!, judged!, newest!])
+          assert.include(["queued", "measuring"], yield* state(kept));
+        // A dropped build owes nothing: a restart does not measure it after all.
         const owed = (yield* facts.owed).map((b) => b.key);
-        assert.notInclude(owed, dropped!.key);
+        for (const gone of [running!, queued!, played!]) assert.notInclude(owed, gone.key);
       }).pipe(Effect.provide(layer));
     }),
   );

@@ -202,9 +202,11 @@ export class GameBuilds extends Context.Service<
         readonly queue?: "person" | "background";
         /** Wait only for the boot check, the QA play and the saved plays (GameFacts.measure). */
         readonly upTo?: "boots";
+        /** The game's newest build: its other measures nobody waits on are dropped (GameFacts.measure). */
+        readonly supersede?: boolean;
       },
     ) => Effect.Effect<GameBuildFacts, GameOperationError>;
-    /** Measures the work owed by data (rows owing tiers, live runs' rounds) and settles cut-short restores. */
+    /** Measures each game's current build when it owes a reading (rows owing tiers of older builds wait for a person to open them). */
     readonly reconcile: Effect.Effect<void>;
     /**
      * Fixes a turn build's base (what restoring undoes it to) as the turn
@@ -851,10 +853,10 @@ const make = Effect.gen(function* () {
     failed("Builds", root, "io", "the game's builds could not be read", cause);
 
   /** A folder's state from the records. */
-  const folderOf = (g: Pick<Game, "threadId" | "root" | "projectId">) =>
+  const folderOf = (g: Pick<Game, "root" | "projectId">) =>
     projections.getGameBuildFolder(g.projectId, g.root).pipe(Effect.mapError(readFailed(g.root)));
   /** The build the folder holds, as the records say: its newest landing, keep or restore. */
-  const folderCurrent = (g: Pick<Game, "threadId" | "root" | "projectId">) =>
+  const folderCurrent = (g: Pick<Game, "root" | "projectId">) =>
     Effect.map(folderOf(g), (folder) => folder?.current ?? null);
   /** A folder's builds, newest first, from `before`. */
   const recordsOf = (
@@ -2421,53 +2423,52 @@ const make = Effect.gen(function* () {
       });
     });
 
-  // A chat turn's work is registered after its checkpoint commits, so a
-  // restart can cut it off. Owed from data: the newest turn build of each
-  // turn-loop game gets its base recorded and, with no facts yet, its
-  // background measure. Its play is not replayed: the Stage offers Rebuild.
-  const reconcileTurns = Effect.gen(function* () {
-    const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
-    for (const summary of games)
-      yield* Effect.gen(function* () {
-        const manifest = yield* projects.read(summary.root);
-        const engine = manifest.engine.name;
-        if (!engineProfile(engine).turnLoop) return;
-        const rows = yield* projections.listProjectTurnCheckpoints(summary.projectId, { limit: 5 });
+  // Owed from data, after a restart or between startup and the reactor's subscription. A chat
+  // turn's work is registered after its checkpoint commits, so a restart can cut it off: the
+  // newest turn build of each turn-loop game gets its base recorded (its play is not replayed:
+  // the Stage offers Rebuild). Then only the build each folder holds is measured, when it was
+  // never measured or its row still owes a tier: an older build owing one is played by nobody,
+  // and a person who opens it measures it then.
+  const reconcileGame = (
+    summary: { readonly root: string; readonly projectId: ProjectId },
+    owed: ReadonlySet<string>,
+  ) =>
+    Effect.gen(function* () {
+      const manifest = yield* projects.read(summary.root);
+      const engine = manifest.engine.name;
+      if (engineProfile(engine).turnLoop) {
+        const rows = yield* projections.listProjectTurnCheckpoints(summary.projectId, {
+          limit: 5,
+        });
         const newest = rows.find(
           (row) => row.cwd === summary.root && row.checkpoint.files.length > 0,
         );
-        if (newest === undefined) return;
-        yield* recordTurn(newest.threadId, newest.checkpoint.ref);
-        const ref = (yield* checkpoints.listCheckpointRefs({
-          cwd: summary.root,
-          prefix: newest.checkpoint.ref,
-        })).find((each) => each.checkpointRef === newest.checkpoint.ref);
-        if (ref === undefined || !isGameBuildId(ref.oid)) return;
-        const lane = manifest.project;
-        const [tree] = yield* checkpoints.resolveTrees({
-          cwd: summary.root,
-          revisions: [ref.oid],
-          path: lane,
-        });
-        if (tree === null || tree === undefined) return;
-        const build = { root: summary.root, build: ref.oid, key: `${engine}:${tree}`, engine };
-        if ((yield* facts.read(build)).state === "never")
-          yield* facts.measure(build, { queue: "background", supersede: true });
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("A game's owed turn work could not be reconciled.", {
-            root: summary.root,
-            cause,
-          }),
-        ),
-      );
-  });
+        if (newest !== undefined) yield* recordTurn(newest.threadId, newest.checkpoint.ref);
+      }
+      const current = yield* folderCurrent(summary);
+      if (current === null) return;
+      const [tree] = yield* checkpoints.resolveTrees({
+        cwd: summary.root,
+        revisions: [current],
+        path: manifest.project,
+      });
+      if (tree === null || tree === undefined) return;
+      const build = { root: summary.root, build: current, key: `${engine}:${tree}`, engine };
+      if (owed.has(build.key) || (yield* facts.read(build)).state === "never")
+        yield* facts.measure(build, { queue: "background", supersede: true });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("A game's owed build work could not be reconciled.", {
+          root: summary.root,
+          cause,
+        }),
+      ),
+    );
 
-  // Measures owed from data, after a restart or between startup and the
-  // reactor's subscription: every row that still owes a tier.
   const reconcile: GameBuilds["Service"]["reconcile"] = Effect.gen(function* () {
-    for (const build of yield* facts.owed) yield* facts.measure(build, { queue: "background" });
-    yield* reconcileTurns;
+    const owed = new Set((yield* facts.owed).map((build) => build.key));
+    for (const summary of yield* projects.list().pipe(Effect.orElseSucceed(() => [])))
+      yield* reconcileGame(summary, owed);
   }).pipe(Effect.catchCause((cause) => Effect.logWarning("Build reconcile failed.", { cause })));
 
   const stopPlay: GameBuilds["Service"]["stopPlay"] = (threadId, ref) =>

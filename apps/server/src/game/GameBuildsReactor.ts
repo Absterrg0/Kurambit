@@ -21,7 +21,7 @@ import * as GameStage from "./GameStage.ts";
  * Keeps the Builds rail current without polling: a chat turn starting or settling
  * (turnPending), a turn's checkpoint, a run's round, a run's end and a run's
  * restore each push "builds" to the game's clients.
- * A run's round is measured as it lands, so its card
+ * A run's kept round is measured as it lands, so its card
  * has facts without anyone opening it.
  *
  * A chat turn's build has its base recorded as it lands. The turn loop: on
@@ -176,9 +176,13 @@ const make = Effect.gen(function* () {
         ).pipe(Effect.andThen(folderFreed(event)));
       case "game-run-round.recorded": {
         const record = event.payload.round;
+        // A kept step's build is the game's newest; an undone one is played no more, and its
+        // judge already measured what it was judged by.
         return pushTo(event, `Round ${record.round} landed.`).pipe(
           Effect.flatMap((root) =>
-            record.build === undefined ? Effect.void : builds.measureIn(root, record.build),
+            record.build === undefined || !record.kept
+              ? Effect.void
+              : builds.measureIn(root, record.build, { supersede: true }),
           ),
           Effect.ignore,
         );

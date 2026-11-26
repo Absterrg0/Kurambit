@@ -271,8 +271,11 @@ interface Job {
   readonly ticket: LaneTicket;
   /** A person asked: standing faults are tried again. */
   person: boolean;
-  /** Only a newer turn build's measure asked: a newer one drops it while it waits. */
-  supersedable: boolean;
+  /**
+   * Askers waiting on it now (a keep going judge, an agent's tool, a bring-in's check): while
+   * any does, a newer build of the game never drops it.
+   */
+  waiting: number;
   /** What it measures, known once it runs. */
   tiers: ReadonlySet<Tier> | null;
   /** Facts this measure has saved so far: each shows as it lands, not when the job ends. */
@@ -309,10 +312,11 @@ export class GameFacts extends Context.Service<
      * a measure no person asked for goes with the rest; a running one that a
      * more urgent one outranks gives way at once and goes on after it. A
      * person's measure waits behind at most three others of theirs; past that
-     * it starts nothing and says so. With `supersede` (a chat turn's newest
-     * build), it drops the game's other queued measures that asked the same:
-     * only the newest turn is worth the wait. A running measure, a person's
-     * and a run's are never dropped. `upTo: "boots"` waits only for the
+     * it starts nothing and says so. With `supersede` (the game's newest
+     * build: a turn's, a kept step's, a keep or a restore), it drops the game's
+     * other measures, queued or running: nobody plays an older build again.
+     * A person's measure and one somebody waits on now are never dropped.
+     * `upTo: "boots"` waits only for the
      * boot check, the QA play and the saved plays, the readings keep going
      * judges a step by; the random-input play goes on behind it.
      */
@@ -1049,6 +1053,23 @@ const make = Effect.gen(function* () {
   const measure: GameFacts["Service"]["measure"] = (build, options = {}) =>
     Effect.gen(function* () {
       const person = options.queue === "person";
+      const supersede = options.supersede === true && !person;
+      // Dropped before anything yields: a dropped job not yet running never starts (runJob reads
+      // `stopped` and sets `running` with no yield between); a running one is interrupted below.
+      const dropped = supersede
+        ? [...jobs.values()].filter(
+            (job) =>
+              job.build.root === build.root &&
+              job.build.key !== build.key &&
+              !job.person &&
+              job.waiting === 0,
+          )
+        : [];
+      for (const job of dropped) {
+        job.stopped = true;
+        jobs.delete(job.build.key);
+      }
+      yield* Effect.forEach(dropped, drop, { discard: true });
       // Nothing owed starts no job: a job that plans nothing ends at once, and a reader that
       // caught it queued would never hear that it ended unless its build's facts moved.
       if (!jobs.has(build.key)) {
@@ -1063,45 +1084,32 @@ const make = Effect.gen(function* () {
           ).size > 0;
         if (!owes) return yield* read(build);
       }
-      const supersede = options.supersede === true && !person;
-      // A superseding measure is a chat turn's newest build (GameBuilds).
+      // A superseding measure is the game's newest build (GameBuilds).
       const priority: PlayPriority = person ? "person" : supersede ? "turn" : "background";
-      // Decided and registered in one step, with nothing yielding between: a
-      // job not yet running cannot start while it is dropped (runJob reads
-      // `stopped` and sets `running` with no yield between).
+      const waits = options.waitFor !== undefined;
+      // Decided and registered in one step, with nothing yielding between, so a newer build
+      // never drops a job between its registration and its asker's wait counting.
       const asked = yield* Effect.suspend(
         (): Effect.Effect<{
           job: Job | null;
-          dropped: ReadonlyArray<Job>;
           queued: boolean;
         }> => {
           const existing = jobs.get(build.key);
           if (existing !== undefined) {
             if (person) existing.person = true;
-            if (!supersede) existing.supersedable = false;
+            if (waits) existing.waiting += 1;
             return Effect.as(playLane.raise(existing.ticket, priority), {
               job: existing,
-              dropped: [],
               queued: false,
             });
           }
           if (person && personWaiting() >= QUEUE_LIMIT)
-            return Effect.succeed({ job: null, dropped: [], queued: false });
-          const dropped = supersede
-            ? [...jobs.values()].filter(
-                (job) =>
-                  job.build.root === build.root && job.supersedable && !job.person && !job.running,
-              )
-            : [];
-          for (const job of dropped) {
-            job.stopped = true;
-            jobs.delete(job.build.key);
-          }
+            return Effect.succeed({ job: null, queued: false });
           const fresh: Job = {
             build,
             ticket: playLane.ticket(priority),
             person,
-            supersedable: supersede,
+            waiting: waits ? 1 : 0,
             tiers: null,
             written: new Set(),
             running: false,
@@ -1114,12 +1122,11 @@ const make = Effect.gen(function* () {
           return Effect.forkIn(runJob(fresh), scope).pipe(
             Effect.map((fiber) => {
               fresh.fiber = fiber;
-              return { job: fresh, dropped, queued: true };
+              return { job: fresh, queued: true };
             }),
           );
         },
       );
-      yield* Effect.forEach(asked.dropped, drop, { discard: true });
       // A build read before this, as a turn's lands, says "never" until told:
       // queued behind another measure, nothing else would tell it for minutes.
       if (asked.queued)
@@ -1140,6 +1147,11 @@ const make = Effect.gen(function* () {
         yield* Deferred.await(options.upTo === "boots" ? job.booted : job.done).pipe(
           Effect.timeoutOption(options.waitFor),
           Effect.ignore,
+          Effect.ensuring(
+            Effect.sync(() => {
+              job.waiting -= 1;
+            }),
+          ),
         );
       return yield* read(build);
     });
