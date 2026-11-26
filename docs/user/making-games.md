@@ -475,21 +475,24 @@ chat. The command palette has each of these, plus **Export…** and **Go back to
 a build…**. A game you clicked into owns every key, Tab, Escape and the number keys included; only
 these `mod+Alt` keys reach Kurambit while you play.
 
-**Checks** are what Kurambit measured by playing the build, only what you would act on: whether
-it boots, whether it crashes or stops answering in a minute of random input, and for a three.js
-game a QA pass (it presses every control the game declares on a fresh run, ends a run and presses
-Retry, and reads the HUD at a wide and a narrow window, so a dead key, a Retry that keeps the last
-run's leftovers or text off the screen shows up as a failing check) and how smoothly the game ran:
-frames per second, the slowest 1% of frames, the GPU's time per frame and the share of the
-resolution it drew at. On a machine where Kurambit's browser cannot use the GPU, performance says
-so instead of guessing.
+**Checks** are what Kurambit measured by playing the build, only what you would act on: whether it
+boots, whether it crashes or stops answering in a minute of random input, and for a three.js game a
+QA pass (it presses every control the game declares on a fresh run, ends a run and presses Retry,
+and reads the HUD at a wide and a narrow window, so a key the game reads nowhere the pass goes, in
+play, on its title or at its ending, a Retry that keeps the last run's leftovers or text off the
+screen shows up as a failing check; a key read only on a screen the pass never reaches, such as a
+shop or an upgrade pick, shows up too, so try it yourself before changing it) and how smoothly
+the game ran: frames per second, the slowest 1% of frames, the GPU's time per frame and the share
+of the resolution it drew at. On a machine where Kurambit's browser cannot use the GPU, performance
+says so instead of guessing.
 
 To prove the game can be won, save a winning run as a test play (see **Test plays** below): every
 build after it replays it and says whether it still ends the same.
-Opening or playing a build that was never measured measures it, one build at a time, and a
-three.js game measures each turn's build in the background when the turn ends. A check Kurambit
-could not measure says **Not measured** and why, and never counts as a result: if a tool failed,
-**Measure again** tries once more. Your agent sees the same builds and checks.
+Opening or playing a build that was never measured measures it, and a three.js game measures its
+newest build in the background when a turn ends; a newer build stops the measure of an older one,
+which opening that build measures again. A check Kurambit could not measure says **Not measured**
+and why, and never counts as a result: if a tool failed, **Measure again** tries once more. Your
+agent sees the same builds and checks.
 
 ## Working in several chats at once
 

@@ -493,7 +493,8 @@ hand has no stamp, so only fresh sessions read it.
 - **Facts are keyed by content.** A facts row is keyed by the git tree of the build's engine
   folder plus a harness id, so builds with the same project share facts, and facts from another
   harness are never compared. Owed work is data, not memory: a measure writes its row first, so
-  a startup reconcile re-measures any row that still owes a tier. Exports, checks, explore,
+  a startup reconcile measures each folder's current build whose row still owes a tier; an older
+  build owing one is measured when someone opens it. Exports, checks, explore,
   and Play's freshness key the working folder the same way: the engine folder's
   tree in a capture of the working tree ([sourceTree](../../apps/server/src/game/sourceTree.ts)),
   never a walk of our own. Git records a link, not what it points at, so a link in the engine
@@ -527,8 +528,13 @@ hand has no stamp, so only fresh sessions read it.
   The browser keeps what each backend printed to the probe, and a play drawn in software leaves
   the performance fact "not measured" with that output: a harness fault, never the game's.
 - **One play lane, by who waits.** A build's measure and `game_check`'s play each hold the
-  server's one [play lane](../../apps/server/src/game/playLane.ts), so no two of them share the
-  GPU and none of their readings needs a "shared" caveat. Holds go to an agent's check, then a
+  server's one [play lane](../../apps/server/src/game/playLane.ts), so on a GPU no two of them
+  share it and none of their readings needs a "shared" caveat. When the probe finds software
+  rendering no frame time is read, so the lane holds a quarter of the cores' plays at once.
+  Only what someone will look at is measured: a measure of the folder's newest build
+  (`supersede`) drops the game's other measures, queued or running, except a person's and one
+  an asker waits on now (keep going's judge), so a judge's wait is what keeps its build served.
+  Holds go to an agent's check, then a
   person's measure, then a chat turn's, then the rest, first asked within each. A holder that a waiter outranks is interrupted at once and runs
   again from its row on its next turn, so a half-played tier is never a fact, and the waiter
   waits only for that teardown (a bot run's stop, bounded in GameBot) plus the holds of its own
@@ -540,9 +546,10 @@ hand has no stamp, so only fresh sessions read it.
   A reason that changes what a person is told or what the harness does next carries a `cause`
   literal beside `why`; the client words the cause and the harness branches on it, and neither
   reads meaning out of `why`, which is the agents' text and free to change.
-- **Facts skip what is already known or not needed.** The boot check is not run again when this
-  server's own final `game_check` (op `final`, the one that also plays the scene report and the
-  QA play) booted the same bytes (engine folder and `game.json`) clean.
+- **Facts skip what is already known or not needed.** The boot check and the saved plays'
+  replay are not run again when this server's own final `game_check` (op `final`, the one that
+  also plays the scene report and the QA play) took them on the same bytes (engine folder and
+  `game.json`), clean or not: an agent's final on a turn's last files is that build's measure.
 - **A restore commits, then moves.** Undo, Redo, Go back and a landing commit their restore
   (`game-build.restore`; a landing's build in the same commit) and the folder's moves
   (`withBuildInFolder`, under the `game-builds` run-ref folder) run as that record's outbox
@@ -589,7 +596,7 @@ cannot both find none.
   asset counts were cut: nobody acted on them, and the plays cost minutes between steps.
 - **Nothing between steps waits on a play.** The look reads the facts measured on the folder's
   build so far, so step 1 starts at once from the newest `Next:`. The judge waits only for the
-  boot check and the QA play (`upTo: "boots"`), usually the step's own clean `game_check` on the
+  boot check and the QA play (`upTo: "boots"`), usually the step's own final `game_check` on the
   same files; the random-input play goes on behind the next step. While the current build's play
   has no reading yet (queued, playing, or dropped for a newer build), the look also reads the build it was made from (`earlier`), so an error that
   play found there is the next blocker rather than an undo. **The look reads the folder's build.** The current build is the newest turn build that changed
