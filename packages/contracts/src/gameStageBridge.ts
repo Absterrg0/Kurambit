@@ -583,7 +583,8 @@ export const StudioMark = Schema.Struct({
   mark: GamePlayMark,
 });
 
-export const GameLogLevel = Schema.Literals(["error", "warn", "log"]);
+/** `renderer`: an error after the page's WebGL context was lost, the renderer's and not the game's. */
+export const GameLogLevel = Schema.Literals(["error", "warn", "log", "renderer"]);
 export type GameLogLevel = typeof GameLogLevel.Type;
 export const GameLogLine = Schema.Struct({
   level: GameLogLevel,

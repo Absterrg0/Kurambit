@@ -76,6 +76,23 @@ const logLine = (level, args) => {
   logPending = true;
   pageTimeout(flushLog, LOG_BATCH_MS);
 };
+// A lost WebGL context (the browser's GPU process crashed or was reset) makes three.js log a
+// shader or program error for every draw after it: those are the renderer's, not the game's, so
+// they are logged as the renderer's and never counted among the page's errors. The harness's
+// page session reads this line too (webPlaySession.ts RENDERER_LOST). Once lost, the page stays
+// so: a restored context recompiles every shader, which is when those errors come.
+let rendererLost = false;
+window.addEventListener(
+  "webglcontextlost",
+  () => {
+    if (rendererLost) return;
+    console.warn(
+      "WebGL context lost: the browser's renderer stopped drawing this page; errors after this are the renderer's, not the game's.",
+    );
+    rendererLost = true;
+  },
+  true,
+);
 if (framed)
   for (const [method, level] of [
     ["log", "log"],
@@ -85,7 +102,7 @@ if (framed)
   ]) {
     const original = console[method].bind(console);
     console[method] = (...args) => {
-      logLine(level, args);
+      logLine(rendererLost && level === "error" ? "renderer" : level, args);
       original(...args);
     };
   }
@@ -95,6 +112,10 @@ if (framed)
 export const errors = [];
 let told = false;
 const record = (message, stack, where) => {
+  if (rendererLost) {
+    logLine("renderer", [String(message)]);
+    return;
+  }
   logLine("error", [String(message)]);
   if (errors.length < 50)
     errors.push({

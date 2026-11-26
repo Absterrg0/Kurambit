@@ -1576,7 +1576,13 @@ function LogLine({ line }: { line: StageConsoleLine }) {
       </Text>
       <Text
         variant="caption"
-        tone={line.level === "error" ? "destructive" : line.level === "log" ? "muted" : "inherit"}
+        tone={
+          line.level === "error"
+            ? "destructive"
+            : line.level === "log" || line.level === "renderer"
+              ? "muted"
+              : "inherit"
+        }
         mono
         render={
           <span

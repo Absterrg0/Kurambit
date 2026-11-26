@@ -190,6 +190,11 @@ export class WebBrowserGone extends Error {
  * the way games clamp dt, so a page that stalls gains no time for the stall).
  * Both stop when the page's main thread does.
  */
+/**
+ * A page's WebGL context was lost: the shell's own line (shell/studio.js), Chromium's, or
+ * three.js's from a shell that predates it.
+ */
+const RENDERER_LOST = /WebGL context lost|CONTEXT_LOST_WEBGL|THREE\.WebGLRenderer: Context Lost/;
 /** Set before any script runs: the shell's QA counters (shell/studio.js) wrap what it watches. */
 const QA_COUNTERS = "window.__studioQa = true;";
 /**
@@ -674,8 +679,17 @@ export const openWebPlaySession = async (input: {
       record("error", `script failed to load: ${response.url()} (${response.status()})`);
       notify({ kind: "script-failed", url: response.url(), status: response.status() });
     });
+    // After the page's WebGL context was lost, its errors are the renderer's (shell/studio.js):
+    // said at level "renderer", never counted as the game's errors or as why it did not boot.
+    let rendererLost = false;
+    const renderers = (text: string) => {
+      notify({ kind: "console", level: "renderer", text, url: "" });
+      record("warning", `renderer: ${text.trim()}`);
+    };
     page.on("console", (message) => {
       const type = String(message.type() ?? "log");
+      if (RENDERER_LOST.test(message.text())) rendererLost = true;
+      if (rendererLost && type === "error") return renderers(message.text());
       notify({
         kind: "console",
         level: type,
@@ -695,6 +709,7 @@ export const openWebPlaySession = async (input: {
       if (type === "error") pageError(message.text(), undefined);
     });
     page.on("pageerror", (error) => {
+      if (rendererLost) return renderers(error instanceof Error ? error.message : String(error));
       errored();
       notify({
         kind: "pageerror",
