@@ -197,12 +197,20 @@ export function nextGamePreviewFrame(
 }
 
 /**
- * A live game's identity: its serve and the last settled change under the
- * folder, so each live push is a new game to show.
+ * A live game's identity: its serve, the last settled change under the folder, and the last
+ * build the folder landed on whose change no push brought (`missedBuild`), so each live push
+ * and each such build is a new game to show.
  */
-export const liveServe = (previewUrl: string | null, liveRevision: number): GamePreviewServe => ({
+export const liveServe = (
+  previewUrl: string | null,
+  liveRevision: number,
+  missedBuild: string | null = null,
+): GamePreviewServe => ({
   previewUrl,
-  servedArtifactId: previewUrl === null ? null : `live:${liveRevision}`,
+  servedArtifactId:
+    previewUrl === null
+      ? null
+      : `live:${liveRevision}${missedBuild === null ? "" : `+${missedBuild}`}`,
 });
 
 /**

@@ -342,7 +342,9 @@ The person's own play depends on how the engine is staged (`GAME_ENGINES[engine]
 ([GamePreview.ts](../../apps/server/src/game/GamePreview.ts)) is the game's dev server, one
 loopback server and one recursive watch per game, so the person watches the agent's saves land. A
 settled save (400 ms, Blender sources and editors' temporaries filtered out) is one `live` push
-on the game event stream, which the Stage remounts on; it rereads nothing. Serving is not a write,
+on the game event stream, which the Stage remounts on; it rereads nothing. A build the folder lands
+on (a turn's, a restore's) whose push has not come a moment later remounts it too, so a missed push
+never leaves an older page playing under a newer build's name. Serving is not a write,
 so Play there takes no lock and records no operation, and Stop closes the watch before the server
 so nothing is pushed after it. What the person sees mid-turn is never a build: builds stay the
 turns' checkpoints, because facts, Undo and Go back need a fixed tree, and a folder the agent is

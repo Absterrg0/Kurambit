@@ -301,6 +301,23 @@ it("holds a live change silently while hidden and loads it when shown", () => {
   expect(liveServe(null, 3).servedArtifactId).toBeNull();
 });
 
+// A build whose change no push brought must not leave the old page playing under its name.
+it("takes a build the live push missed as a new game, held for a player like a push", () => {
+  const URL = "http://127.0.0.1:9/";
+  const first = remountOrHold(null, liveServe(URL, 4), WATCHING);
+  const missed = liveServe(URL, 4, "build-7");
+  expect(remountOrHold(first, missed, WATCHING).key).not.toBe(first.key);
+  expect(remountOrHold(first, missed, { ...IN_GAME, newBuild: true })).toMatchObject({
+    key: first.key,
+    heldFor: "focus",
+    held: missed,
+  });
+  // Once shown it stays shown until the next push, which is one remount more.
+  const shown = remountOrHold(first, missed, WATCHING);
+  expect(remountOrHold(shown, liveServe(URL, 4, "build-7"), WATCHING)).toBe(shown);
+  expect(remountOrHold(shown, liveServe(URL, 5, "build-7"), WATCHING).key).not.toBe(shown.key);
+});
+
 it("reloads on request, with what is held or the same serve again", () => {
   const URL = "http://127.0.0.1:9/";
   const first = remountOrHold(null, liveServe(URL, 0), WATCHING);

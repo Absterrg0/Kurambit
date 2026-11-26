@@ -333,6 +333,14 @@ const isFolderGameFrame = (target: EventTarget | null) =>
 const PLAYER_GRACE_MS = 4000;
 
 /**
+ * How long a build the folder landed on waits for the live push of its change (the server
+ * settles a save for 400 ms) before the Stage remounts for it on its own.
+ */
+const LIVE_PUSH_GRACE_MS = 2000;
+/** A frame mounted this long before such a build was listed already loaded what it holds. */
+const LIVE_PUSH_LEAD_MS = 5000;
+
+/**
  * The person is playing: the Stage's game frame has the keyboard, or had it a moment ago. A click
  * into the frame sends no focus event to it, the app's window only blurs, so the frame is read
  * as the document's focused element whenever focus moves.
@@ -692,18 +700,60 @@ function ThreadGameStage({
   // The folder settling on a new build (a turn's end, an Undo) takes one frame of it, since the
   // game may have come up mid-turn, before the build it now shows existed.
   const framed = useBuildFrame(folderBuild) !== null;
+  // The frame on screen was mounted for another build than the folder holds and never loaded
+  // it: a turn's or a restore's change whose live push has not reached this Stage (yet).
+  const unseenBuild =
+    frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild && !landing
+      ? folderBuild
+      : null;
+  // Values kept from the Stage change nothing its game loads: it already plays them.
+  if (
+    unseenBuild !== null &&
+    currentBuild?.id === unseenBuild &&
+    currentBuild.source._tag === "saved" &&
+    currentBuild.source.edit === "values" &&
+    currentBuild.base === frameBuild
+  )
+    setFrameBuild(unseenBuild);
+  // The last build the frame remounted for on its own, not for a live push: part of its identity.
+  const [missedBuild, setMissedBuild] = useState<string | null>(null);
+  const frameMountedAt = useRef(0);
+  const mountedKey = frameFold?.key;
   useEffect(() => {
-    if (folderBuild === null || turnRunning || framed || asked !== null) return;
+    if (mountedKey !== undefined) frameMountedAt.current = Date.now();
+  }, [mountedKey]);
+  // The push normally remounts the frame first, or soon after the build is listed. Past that,
+  // a frame mounted shortly before the build was listed loaded what it holds and takes its
+  // name; any other frame missed the change and remounts for it, or offers it to a player.
+  useEffect(() => {
+    if (unseenBuild === null) return;
+    const listedAt = Date.now();
+    const timeout = window.setTimeout(() => {
+      if (frameMountedAt.current >= listedAt - LIVE_PUSH_LEAD_MS) setFrameBuild(unseenBuild);
+      else setMissedBuild(unseenBuild);
+    }, LIVE_PUSH_GRACE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [unseenBuild]);
+  useEffect(() => {
+    // A frame that is not the folder's build yet would picture the wrong game under its name.
+    if (folderBuild === null || turnRunning || framed || asked !== null || unseenBuild !== null)
+      return;
     const timeout = window.setTimeout(() => void captureStageFrame(), 1500);
     return () => window.clearTimeout(timeout);
-  }, [folderBuild, turnRunning, framed, asked]);
+  }, [folderBuild, turnRunning, framed, asked, unseenBuild]);
   useEffect(() => {
     if (stageStill === keptStill.current) return;
     keptStill.current = stageStill;
-    // A copy of an older build on the Stage is not the folder's build.
-    if (stageStill !== null && folderBuild !== null && !turnRunning && asked === null)
+    // A copy of an older build on the Stage, or a frame that missed the folder's, is not it.
+    if (
+      stageStill !== null &&
+      folderBuild !== null &&
+      !turnRunning &&
+      asked === null &&
+      unseenBuild === null
+    )
       keepBuildFrame(folderBuild, stageStill);
-  }, [stageStill, folderBuild, turnRunning, asked]);
+  }, [stageStill, folderBuild, turnRunning, asked, unseenBuild]);
   const stageRef = useRef<HTMLElement | null>(null);
   const playerIn = usePlayerInGame(stageRef);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1181,7 +1231,7 @@ function ThreadGameStage({
   const computed = remountOrHold(
     frameFold,
     stageKind === "live"
-      ? liveServe(data.previewUrl, liveRevision)
+      ? liveServe(data.previewUrl, liveRevision, missedBuild)
       : {
           previewUrl: data.previewUrl,
           servedArtifactId:
