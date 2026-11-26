@@ -401,6 +401,16 @@ function ConnectedAgentsStep({
           </div>
         ) : null}
       </SettingsGroup>
+      {terminalSession !== null ? (
+        <AgentInstallTerminal
+          key={`${terminalSession.environmentId}:${terminalSession.providerInstanceId}:${terminalSession.driver}`}
+          session={terminalSession}
+          onClose={() => {
+            setTerminalSession(null);
+            void refreshProviders({ environmentId, input: {} });
+          }}
+        />
+      ) : null}
       <SettingsGroup className="mt-3">
         <BlenderRow environmentId={environmentId} />
       </SettingsGroup>
@@ -411,16 +421,6 @@ function ConnectedAgentsStep({
           onAccountCreated={(instanceId, displayName) =>
             setCreatedAccount({ instanceId, displayName, autoStart: true })
           }
-        />
-      ) : null}
-      {terminalSession !== null ? (
-        <AgentInstallTerminal
-          key={`${terminalSession.environmentId}:${terminalSession.providerInstanceId}:${terminalSession.driver}`}
-          session={terminalSession}
-          onClose={() => {
-            setTerminalSession(null);
-            void refreshProviders({ environmentId, input: {} });
-          }}
         />
       ) : null}
     </section>
