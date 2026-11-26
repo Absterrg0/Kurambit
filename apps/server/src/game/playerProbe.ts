@@ -43,11 +43,14 @@ export const PLAYER_PROBE = `(() => {
   raf(watch);
   if (typeof AudioNode === "undefined") return;
   const started = () => (kp.sounds += 1);
-  const start = AudioScheduledSourceNode.prototype.start;
-  AudioScheduledSourceNode.prototype.start = function (...args) {
-    started();
-    return start.apply(this, args);
-  };
+  // A buffer's source has a start() of its own, which the scheduled sources' does not reach.
+  for (const node of [AudioScheduledSourceNode, AudioBufferSourceNode]) {
+    const start = node.prototype.start;
+    node.prototype.start = function (...args) {
+      started();
+      return start.apply(this, args);
+    };
+  }
   const play = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function (...args) {
     started();
