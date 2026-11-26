@@ -1481,10 +1481,9 @@ const make = Effect.gen(function* () {
    * What the measure found wrong in the build the folder holds, beside the person's next message.
    * The measure lands after the turn that made the build, and an agent reads facts only when it
    * asks (op list), so without this a problem the person sees on the build never reached the agent.
-   * The bad readings the build's line counts as problems, in keep going's words for them, but for
-   * First minute's: they name neither the input nor the line they missed, so an agent chases them
-   * without moving them. A reading the chat's last note already gave, unchanged (by the compare's
-   * "same": its value, else its text), is the agent's choice made, not news, and is left out.
+   * The bad readings the build's line counts as problems, in keep going's words for them. A reading
+   * the chat's last note already gave, unchanged (by the compare's "same": its value, else its
+   * text), is the agent's choice made, not news, and is left out.
    */
   const told = new Map<ThreadId, ReadonlySet<string>>();
   const problemsNote: GameTurnNotes.GameTurnNote = ({ threadId, person }) =>
@@ -1496,9 +1495,7 @@ const make = Effect.gen(function* () {
       const resolved = id === null ? undefined : (yield* resolveOf(g, [id])).get(id);
       if (record === null || resolved === undefined) return null;
       const bad = gameFactsView(yield* facts.read(resolved)).flatMap((view) =>
-        view.id !== "first-minute" &&
-        view.reading._tag === "measured" &&
-        view.reading.tone === "bad"
+        view.reading._tag === "measured" && view.reading.tone === "bad"
           ? [
               {
                 key: `${view.id} ${view.reading.value ?? view.reading.text}`,
