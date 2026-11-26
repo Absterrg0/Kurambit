@@ -45,18 +45,26 @@ const make = Effect.gen(function* () {
     );
     if (root !== null) {
       yield* operations.cancel(root, String(threadId));
-      yield* explore.release(threadId, root);
+      yield* explore.release(threadId, root, "cancelled");
     }
+  });
+
+  /** A completed turn has no tool call in flight: only its explore session is left to close. */
+  const closeSession = Effect.fn("GameTurnCancellationReactor.closeSession")(function* (
+    threadId: ThreadId,
+  ) {
+    const root = yield* projects.resolve(threadId).pipe(Effect.orElseSucceed(() => null));
+    if (root !== null) yield* explore.release(threadId, root, "turn-ended");
   });
 
   // A turn that ended without completing (capped, cancelled, failed, rolled
   // back, its thread deleted or recovered) leaves no game work behind: its
-  // operations, queued or running, and its explore session. A
-  // completed turn has no tool call in flight, and its explore session may
-  // idle out between turns.
+  // operations, queued or running, and its explore session. A completed turn
+  // closes its explore session too: left open, its page drew until it idled out.
   const handle: GameTurnCancellationReactor["Service"]["handle"] = (event) => {
-    if (event.type !== "run.updated" || !ENDED_WITHOUT_COMPLETING.has(event.payload.status))
-      return Effect.void;
+    if (event.type !== "run.updated") return Effect.void;
+    if (event.payload.status === "completed") return closeSession(event.threadId);
+    if (!ENDED_WITHOUT_COMPLETING.has(event.payload.status)) return Effect.void;
     return cancelThread(event.threadId).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("cancelling an ended turn's game work failed", {

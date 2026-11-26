@@ -20,15 +20,18 @@ import { chromiumChildEnv } from "./gameChromium.ts";
 import {
   PLAY_BOUNDS,
   PlayClosed,
-  PlayUnresponsive,
+  SMALL_FRAME_WIDTH,
   TIMED_OUT,
   bounded,
   once,
   parseLine,
   sanitizeProbe,
+  smallFramePath,
+  type PlayActObservation,
   type PlayEnd,
   type PlaySession,
 } from "./playSession.ts";
+import { captureViewport } from "../preview/ServerBrowserPage.ts";
 
 // Playwright needs its files on disk; createRequire also resolves it from a Node SEA executable.
 const requirePlaywright = NodeModule.createRequire(import.meta.url);
@@ -465,8 +468,68 @@ export interface KeptStorage {
   readonly contents: string;
 }
 
-/** How long an agent's `eval` expression may run in the page. */
+/** How long an agent's `eval` expression may run in the page (scaled in software, to EVALUATE_MOST_MS). */
 const EVALUATE_MS = 10_000;
+const EVALUATE_MOST_MS = 60_000;
+/**
+ * An agent's expression, run with the run's `ctx` and `GameState` in scope (shell studio.scope):
+ * main.js holds them in module scope, so the page's globals never had them. A direct eval in a
+ * function keeps the expression's statements and completion value as the page's own eval would.
+ */
+const scopedEval = (expression: string) => `((__expression) => {
+  const __scope = window.__studio?.scope?.() ?? {};
+  return (function (ctx, GameState) {
+    return eval(__expression);
+  })(__scope.ctx ?? undefined, __scope.GameState ?? undefined);
+})(${JSON.stringify(expression)})`;
+
+/** The page's own frame time, over three frames drawn as it runs. */
+const FRAME_COST = `new Promise((done) => {
+  const times = [];
+  const tick = (now) => {
+    times.push(now);
+    if (times.length >= 4) done((times[3] - times[0]) / 3);
+    else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})`;
+const FRAME_COST_MS = 10_000;
+/** The frame a bound is made for (30 fps), and the most a slower page stretches it. */
+const SCALE_FRAME_MS = 33;
+const MAX_SCALE = 15;
+/** From an act's first input, how long the probe is watched for a change, and in what slices. */
+const WATCH_MS = 500;
+const WATCH_SLICE_MS = 100;
+
+interface ActProgress {
+  gameMs: number;
+  wallMs: number;
+  /** Where the page fell short, in numbers. */
+  short: string | null;
+}
+
+/** Milliseconds as seconds to a tenth, as the act's numbers say them. */
+const seconds = (ms: number) => String(Math.round(ms / 100) / 10);
+
+/** What an act's probe reading holds, keyed, so its first change can be named. */
+const stateKeys = (raw: Record<string, unknown> | null) => {
+  const probe = sanitizeProbe(raw);
+  const keys = new Map<string, string>();
+  if (probe === null) return keys;
+  if (probe.player !== null)
+    keys.set(
+      "player",
+      [probe.player.x, probe.player.y, probe.player.z].map((v) => v.toFixed(2)).join(","),
+    );
+  for (const [key, value] of Object.entries(probe.gameState))
+    keys.set(`GameState.${key}`, String(value));
+  if (probe.hudText !== undefined) keys.set("hud", probe.hudText);
+  return keys;
+};
+const changedKeys = (before: Map<string, string>, after: Map<string, string>) =>
+  [...new Set([...before.keys(), ...after.keys()])]
+    .filter((key) => before.get(key) !== after.get(key))
+    .slice(0, 8);
 
 export interface WebPlaySession extends PlaySession {
   /** Settles when the page crashed (the game's) or our browser went away (ours). */
@@ -751,27 +814,60 @@ export const openWebPlaySession = async (input: {
     // The run is held while its frame is taken (the shell's hidden-stage hold): a game that keeps
     // drawing makes the screenshot wait on its frames, 8 to 12 s in software, while its run moves
     // on past the moment the act's reading describes. Held, the picture is that moment.
-    const shoot = async () => {
+    // The small frame an agent is shown comes from the browser's own JPEG encoder at a smaller
+    // scale (the preview's capture), taken in the same hold as the PNG, so both are one moment.
+    const cdp = once(() => context.newCDPSession(page));
+    const small = async () => {
+      const data = await cdp()
+        .then((session) =>
+          captureViewport(page, session, {
+            format: "jpeg",
+            quality: 80,
+            scale: Math.min(1, SMALL_FRAME_WIDTH / size.width),
+          }),
+        )
+        .catch(() => null);
+      return data === null ? null : Buffer.from(data, "base64");
+    };
+    const shoot = async (withSmall = false) => {
       await bounded(
         page.evaluate(`(${HOLD_RUN})(true)`).catch(() => undefined),
         PLAY_BOUNDS.webCallMs,
       );
+      let smallShot: Buffer | null = null;
       const first = await page
         .screenshot({ type: "png" })
         .catch(() => null)
+        .then(async (png) => {
+          if (withSmall && png !== null && !looksFlat(png)) smallShot = await small();
+          return png;
+        })
         .finally(() =>
           bounded(
             page.evaluate(`(${HOLD_RUN})(false)`).catch(() => undefined),
             PLAY_BOUNDS.webCallMs,
           ),
         );
-      if (first === null || !looksFlat(first)) return first;
+      if (first === null || !looksFlat(first)) return { png: first, small: smallShot };
       await page
         .evaluate(
           "new Promise((done) => { requestAnimationFrame(() => requestAnimationFrame(done)); setTimeout(done, 250); })",
         )
         .catch(() => undefined);
-      return page.screenshot({ type: "png" }).catch(() => first);
+      const second = await page.screenshot({ type: "png" }).catch(() => first);
+      return { png: second, small: withSmall ? await small() : null };
+    };
+    /** A frame kept at `path` (PNG), its small JPEG beside it; false when no picture came. */
+    const keepShot = async (path: string) => {
+      const shot = await bounded(shoot(true), PLAY_BOUNDS.stillMs * scale);
+      if (shot === TIMED_OUT || shot.png === null) return false;
+      const kept = await NodeFSP.writeFile(path, shot.png).then(
+        () => true,
+        () => false,
+      );
+      if (kept && shot.small !== null)
+        await NodeFSP.writeFile(smallFramePath(path), shot.small).catch(() => undefined);
+      return kept;
     };
     /** The page's state; TIMED_OUT when its main thread did not answer in `ms`. */
     const readState = async (ms: number) => {
@@ -879,12 +975,39 @@ export const openWebPlaySession = async (input: {
     const bootProbe = sanitizeProbe(bootState === TIMED_OUT ? null : bootState);
     const bootConsole = drain();
     let pointer: { x: number; y: number } | null = null;
-    const centre = () => ({ x: Math.round(input.width / 2), y: Math.round(input.height / 2) });
+    // The page's size now: an act may resize it, as a player resizes their window.
+    let size = { width: input.width, height: input.height };
+    const centre = () => ({ x: Math.round(size.width / 2), y: Math.round(size.height / 2) });
+    // Whether an act held the shell's clock: a scripted run lets it go while it plays, then holds it again.
+    let clockHeld = false;
+    // In software one frame can cost a second, and a shader compile several: every bound an
+    // act or eval waits on is scaled by the frame cost measured before the first, so a slow
+    // page is read as slow, in numbers, never as one that stopped answering.
+    let frameMs: number | null = null;
+    let scale = 1;
+    const measured = once(async () => {
+      if (!input.browser.software) return;
+      const cost = await bounded(
+        page.evaluate(FRAME_COST).catch(() => null),
+        FRAME_COST_MS,
+      );
+      frameMs = typeof cost === "number" && Number.isFinite(cost) ? Math.round(cost) : null;
+      scale =
+        frameMs === null ? MAX_SCALE : Math.min(MAX_SCALE, Math.max(1, frameMs / SCALE_FRAME_MS));
+    });
+    const callMs = () => Math.round(PLAY_BOUNDS.webCallMs * scale);
+    const software = () =>
+      input.browser.software
+        ? ` This browser draws in software${frameMs === null ? "" : `: one frame takes about ${frameMs} ms`}.`
+        : "";
+    // The act before still holding the page (it stopped answering): the next waits for it first.
+    let running: Promise<unknown> = Promise.resolve();
     const actBody = async (
       steps: readonly GameExploreStep[],
       screenshotPath: string | null,
-      signal: AbortSignal | undefined,
+      signal: AbortSignal,
       framePath: ((n: number) => string) | undefined,
+      progress: ActProgress,
     ) => {
       let executedInputSteps = 0;
       const frames: Array<{ label: string; path: string }> = [];
@@ -892,57 +1015,114 @@ export const openWebPlaySession = async (input: {
       // Held again each act: the game may have reloaded its page since the last.
       const clocked = await bounded(
         page.evaluate(HOLD_CLOCK).catch(() => false),
-        PLAY_BOUNDS.webCallMs,
+        callMs(),
       );
-      if (clocked === TIMED_OUT) throw unresponsive();
-      /** `ms` of game time: stepped on the held clock, else played in real time. */
-      const pass = async (ms: number) => {
-        if (clocked !== true) return sleep(ms, signal);
-        const wallMs = advanceWallMs(ms);
-        const done = await bounded(
+      if (clocked === TIMED_OUT) {
+        progress.short = `the page took over ${seconds(callMs())} s to answer before the act began`;
+        return null;
+      }
+      clockHeld ||= clocked === true;
+      const first = await readState(callMs());
+      if (first === TIMED_OUT) {
+        progress.short = `the page took over ${seconds(callMs())} s to answer before the act began`;
+        return null;
+      }
+      const before = stateKeys(first);
+      // Set from closures, so held in an object TypeScript does not narrow.
+      const seen: {
+        watch: { gameMs: number; wallStart: number } | null;
+        response?: PlayActObservation["response"];
+      } = { watch: null };
+      /** `ms` of game time: stepped on the held clock, else played in real time. False when the page fell short. */
+      const stepGame = async (ms: number, what: string) => {
+        const at = Date.now();
+        if (clocked !== true) {
+          await sleep(ms, signal);
+          progress.gameMs += ms;
+          progress.wallMs += Date.now() - at;
+          return true;
+        }
+        const wallMs = Math.round(advanceWallMs(ms) * scale);
+        const stepped = await bounded(
           page
             .evaluate(`window.__studio.advanceClock(${ms / 1000}, ${wallMs})`)
             .catch(() => undefined),
-          wallMs + PLAY_BOUNDS.webCallMs,
+          wallMs + callMs(),
         );
-        if (done === TIMED_OUT) throw unresponsive();
-        signal?.throwIfAborted();
+        const took = Date.now() - at;
+        progress.wallMs += took;
+        const steppedMs = typeof stepped === "number" ? stepped * 1000 : 0;
+        if (stepped !== TIMED_OUT) progress.gameMs += steppedMs;
+        signal.throwIfAborted();
+        // Short with its wall bound spent is a page slower than the act allows; short with time
+        // to spare is a run nothing could move (ended, paused), which the probe shows.
+        if (stepped === TIMED_OUT || (steppedMs < ms - 1 && took >= wallMs)) {
+          progress.short = `${what} took ${seconds(took)} s of wall time for ${seconds(stepped === TIMED_OUT ? 0 : steppedMs)} of its ${seconds(ms)} s of game time; the act stopped at ${seconds(progress.gameMs)} s of game time`;
+          return false;
+        }
+        return true;
+      };
+      // From the first input, play is stepped in slices of one slow frame's game time (the
+      // shell's catch-up), each followed by a read: a slice costs about what a frame costs a
+      // person, so the first change is timed as they would see it.
+      const pass = async (ms: number, what: string) => {
+        let left = ms;
+        while (seen.watch !== null && left > 0) {
+          const slice = Math.min(left, WATCH_SLICE_MS);
+          if (!(await stepGame(slice, what))) return false;
+          left -= slice;
+          seen.watch.gameMs += slice;
+          const now = await readState(callMs());
+          if (now === TIMED_OUT) {
+            progress.short = `the page took over ${seconds(callMs())} s to answer a read during ${what}; the act stopped at ${seconds(progress.gameMs)} s of game time`;
+            return false;
+          }
+          const changed = changedKeys(before, stateKeys(now));
+          if (changed.length > 0 || seen.watch.gameMs >= WATCH_MS) {
+            seen.response = {
+              gameMs: changed.length > 0 ? seen.watch.gameMs : null,
+              wallMs: changed.length > 0 ? Date.now() - seen.watch.wallStart : null,
+              watchedMs: seen.watch.gameMs,
+              changed,
+            };
+            seen.watch = null;
+          }
+        }
+        return left <= 0 || (await stepGame(left, what));
+      };
+      const sent = () => {
+        if (seen.response === undefined && seen.watch === null)
+          seen.watch = { gameMs: 0, wallStart: Date.now() };
       };
       // Each step releases its own keys, as the process runners do: a key held
       // into the next step would move the player through it, and pressing the
       // same key again would arrive as auto-repeat, which games ignore.
-      const holdKeys = async (keys: ReadonlyArray<string>, ms: number) => {
+      const holdKeys = async (keys: ReadonlyArray<string>, ms: number, what: string) => {
         const mapped = keys.map(toPlaywrightKey);
         for (const key of mapped) {
           await page.keyboard.down(key);
           held.push(key);
         }
-        await pass(ms);
+        sent();
+        const passed = await pass(ms, what);
         for (const key of mapped) {
           await page.keyboard.up(key);
           held.splice(held.indexOf(key), 1);
         }
         executedInputSteps += 1;
+        return passed;
       };
       try {
         for (const step of steps) {
-          signal?.throwIfAborted();
+          signal.throwIfAborted();
+          let passed = true;
           if ("waitMs" in step) {
-            await pass(step.waitMs);
+            passed = await pass(step.waitMs, `a ${seconds(step.waitMs)} s wait`);
           } else if ("screenshot" in step) {
             // The frame as the route stands here; the game holds still while it is taken.
             if (framePath !== undefined) {
               const path = framePath(frames.length + 1);
-              const frame = await bounded(shoot(), PLAY_BOUNDS.stillMs);
-              if (
-                frame !== null &&
-                frame !== TIMED_OUT &&
-                (await NodeFSP.writeFile(path, frame).then(
-                  () => true,
-                  () => false,
-                ))
-              )
-                frames.push({ label: step.screenshot, path });
+              if (await keepShot(path)) frames.push({ label: step.screenshot, path });
             }
           } else if ("click" in step) {
             const point =
@@ -954,12 +1134,14 @@ export const openWebPlaySession = async (input: {
               clickCount: 1,
             });
             pointer = { x: point.x, y: point.y };
+            sent();
             executedInputSteps += 1;
           } else if ("drag" in step) {
             const { from, to } = step.drag;
             await page.mouse.move(from.x, from.y);
             await page.mouse.down();
-            await pass(step.holdMs);
+            sent();
+            passed = await pass(step.holdMs, `a ${seconds(step.holdMs)} s drag`);
             await page.mouse.move(to.x, to.y, { steps: 8 });
             await page.mouse.up();
             pointer = { x: to.x, y: to.y };
@@ -967,59 +1149,74 @@ export const openWebPlaySession = async (input: {
           } else if ("mouseMove" in step) {
             const base = pointer ?? centre();
             const next = {
-              x: Math.max(0, Math.min(input.width, base.x + step.mouseMove.dx)),
-              y: Math.max(0, Math.min(input.height, base.y + step.mouseMove.dy)),
+              x: Math.max(0, Math.min(size.width, base.x + step.mouseMove.dx)),
+              y: Math.max(0, Math.min(size.height, base.y + step.mouseMove.dy)),
             };
             await page.mouse.move(Math.round(next.x), Math.round(next.y));
             pointer = next;
+            sent();
             executedInputSteps += 1;
           } else if ("keys" in step) {
-            await holdKeys(step.keys, step.holdMs);
+            passed = await holdKeys(step.keys, step.holdMs, `a ${seconds(step.holdMs)} s hold`);
           } else if ("key" in step) {
-            await holdKeys([step.key], step.holdMs);
+            passed = await holdKeys([step.key], step.holdMs, `a ${seconds(step.holdMs)} s hold`);
           } else if ("hold" in step) {
-            await holdKeys([step.hold], step.holdMs);
+            passed = await holdKeys([step.hold], step.holdMs, `a ${seconds(step.holdMs)} s hold`);
           } else if ("press" in step) {
-            await holdKeys([step.press], 50);
+            passed = await holdKeys([step.press], 50, "a press");
           } else {
             // The session lists no ui or inspect capability, so explore refuses
             // those steps before any browser work.
             throw new Error("Unsupported browser step: ui and inspect steps need a control tree.");
           }
-          signal?.throwIfAborted();
+          if (!passed) break;
+          signal.throwIfAborted();
         }
       } finally {
         for (const key of held.splice(0))
           await bounded(page.keyboard.up(key), PLAY_BOUNDS.webCallMs);
       }
-      const state = await readState(PLAY_BOUNDS.webCallMs);
-      if (state === TIMED_OUT) throw unresponsive();
+      if (seen.watch !== null)
+        seen.response = { gameMs: null, wallMs: null, watchedMs: seen.watch.gameMs, changed: [] };
+      const state = await readState(callMs());
+      if (state === TIMED_OUT) {
+        progress.short ??= `the page took over ${seconds(callMs())} s to answer the read after the act`;
+        return {
+          executedInputSteps,
+          frames,
+          response: seen.response,
+          probe: null,
+          screenshot: false,
+        };
+      }
       const probe = sanitizeProbe(state);
-      const shot = screenshotPath === null ? null : await bounded(shoot(), PLAY_BOUNDS.stillMs);
-      const saved =
-        shot !== null && shot !== TIMED_OUT && screenshotPath !== null
-          ? await NodeFSP.writeFile(screenshotPath, shot).then(
-              () => true,
-              () => false,
-            )
-          : false;
-      const drained = drain();
-      return {
-        probe,
-        executedInputSteps,
-        screenshot: saved,
-        frames,
-        consoleMessages: drained.messages,
-        consoleTruncated: drained.truncated,
-      };
+      const saved = screenshotPath === null ? false : await keepShot(screenshotPath);
+      return { executedInputSteps, frames, response: seen.response, probe, screenshot: saved };
     };
-    const unresponsive = () =>
-      new PlayUnresponsive(
-        `The game's page stopped answering (its main thread did not respond within ${PLAY_BOUNDS.webCallMs / 1000} s).`,
-      );
     const act: PlaySession["act"] = async (steps, screenshotPath, signal, framePath) => {
       signal?.throwIfAborted();
       if (endedWith !== null) throw endError(endedWith);
+      await measured();
+      const progress: ActProgress = { gameMs: 0, wallMs: 0, short: null };
+      const observed = (body: Awaited<ReturnType<typeof actBody>> | null): PlayActObservation => {
+        const drained = drain();
+        return {
+          probe: body?.probe ?? null,
+          executedInputSteps: body?.executedInputSteps ?? 0,
+          screenshot: body?.screenshot ?? false,
+          frames: body?.frames ?? [],
+          consoleMessages: drained.messages,
+          consoleTruncated: drained.truncated,
+          clock: { gameMs: Math.round(progress.gameMs), wallMs: progress.wallMs },
+          ...(body?.response === undefined ? {} : { response: body.response }),
+          ...(progress.short === null ? {} : { short: `${progress.short}.${software()}` }),
+        };
+      };
+      const waited = Date.now();
+      if ((await bounded(running, callMs())) === TIMED_OUT) {
+        progress.short = `the page was still busy with the previous act after another ${seconds(Date.now() - waited)} s of wall time`;
+        return observed(null);
+      }
       const stepMs = steps.reduce(
         (sum, step) =>
           sum +
@@ -1028,22 +1225,40 @@ export const openWebPlaySession = async (input: {
         0,
       );
       const frameSteps = steps.filter((step) => "screenshot" in step).length;
+      const stop = new AbortController();
+      const body = actBody(
+        steps,
+        screenshotPath,
+        signal === undefined ? stop.signal : AbortSignal.any([signal, stop.signal]),
+        framePath,
+        progress,
+      );
+      running = body.catch(() => undefined);
+      // Each step's advance may take its own wall bound on a slow page, each frame its own.
+      const boundMs = Math.round(
+        (steps.length * advanceWallMs(0) +
+          2 * stepMs +
+          frameSteps * PLAY_BOUNDS.stillMs +
+          PLAY_BOUNDS.webActGraceMs) *
+          scale,
+      );
       const done = await Promise.race([
         bounded(
-          actBody(steps, screenshotPath, signal, framePath).catch((cause: unknown) => {
+          body.catch((cause: unknown) => {
             throw classify(cause);
           }),
-          // Each step's advance may take its own wall bound on a slow page, each frame its own.
-          steps.length * advanceWallMs(0) +
-            2 * stepMs +
-            frameSteps * PLAY_BOUNDS.stillMs +
-            PLAY_BOUNDS.webActGraceMs,
+          boundMs,
         ),
         ended.then((end) => ({ end })),
       ]);
-      if (done === TIMED_OUT) throw unresponsive();
-      if ("end" in done) throw endError(done.end);
-      return done;
+      if (done !== null && typeof done === "object" && "end" in done) throw endError(done.end);
+      if (done === TIMED_OUT) {
+        // The session stays: the next act waits for this one's page to answer first.
+        stop.abort();
+        progress.short ??= `its ${seconds(stepMs)} s of game time had not played after ${seconds(boundMs)} s of wall time; the act stopped at ${seconds(progress.gameMs)} s of game time`;
+        return observed(null);
+      }
+      return observed(done);
     };
     const keysDown = new Set<string>();
     const refused: Array<{ target: string; error: string }> = [];
@@ -1077,30 +1292,51 @@ export const openWebPlaySession = async (input: {
         return answered === TIMED_OUT ? null : answered;
       },
       stepBot: async (source, options) => {
+        // An act's held clock would keep the run from stepping: let go for the run, held after.
+        const held = clockHeld;
+        if (held)
+          await bounded(
+            page.evaluate("window.__studio?.holdClock?.(false)").catch(() => undefined),
+            callMs(),
+          );
         const answered = await bounded(
           page
             .evaluate(`${RUN_BOT}(${JSON.stringify(source)}, ${JSON.stringify(options)})`)
             .catch(() => null),
           options.wallMs + 15_000,
         );
+        if (held)
+          await bounded(
+            page.evaluate(HOLD_CLOCK).catch(() => undefined),
+            callMs(),
+          );
         return answered === TIMED_OUT ? null : answered;
       },
       resize: async (width, height) => {
         await bounded(
-          page.setViewportSize({ width, height }).catch(() => undefined),
+          page.setViewportSize({ width, height }).then(
+            () => {
+              size = { width, height };
+            },
+            () => undefined,
+          ),
           PLAY_BOUNDS.webCallMs,
         );
       },
       evaluate: async (expression) => {
+        await measured();
+        const boundMs = Math.min(EVALUATE_MOST_MS, Math.round(EVALUATE_MS * scale));
         const answered = await bounded(
-          page.evaluate(expression).then(
+          page.evaluate(scopedEval(expression)).then(
             (value: unknown) => ({ value: value ?? null }),
             (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
           ),
-          EVALUATE_MS,
+          boundMs,
         );
         return answered === TIMED_OUT
-          ? { error: `The expression did not finish within ${EVALUATE_MS / 1000} s.` }
+          ? {
+              error: `The expression had not finished after ${seconds(boundMs)} s of wall time.${software()}`,
+            }
           : answered;
       },
       takePlays: async () => {
@@ -1197,10 +1433,10 @@ export const openWebPlaySession = async (input: {
       refusedStates: () => refused,
       still: async (path) =>
         (await bounded(
-          shoot().then((shot) =>
-            shot === null
+          shoot().then(({ png }) =>
+            png === null
               ? false
-              : NodeFSP.writeFile(path, shot).then(
+              : NodeFSP.writeFile(path, png).then(
                   () => true,
                   () => false,
                 ),

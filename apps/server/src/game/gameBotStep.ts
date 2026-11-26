@@ -19,8 +19,8 @@ import { boundEvidence, END_FRAME } from "./gameBotRuntime.ts";
 import type { PlayLaunch } from "./playLaunch.ts";
 import { botPlayTag, keepPlay } from "./playFiles.ts";
 
-/** What the launch hands the run: the session, how it ended, and how to end what it started. */
-export type BotLaunch = Pick<PlayLaunch, "play" | "stop" | "ended">;
+/** What the launch hands the run: the session it plays in. */
+export type BotLaunch = Pick<PlayLaunch, "play">;
 
 /** Whether a bot file is a stepped one: it exports `decide`. */
 export const isSteppedBot = (source: string) =>
@@ -39,6 +39,8 @@ const BotAnswer = Schema.Struct({
   wallMs: Schema.Number,
   error: Schema.NullOr(Schema.String),
   unknown: Schema.Array(Schema.String),
+  /** decide returned false: the script's own stop; absent from runtimes before 1.38. */
+  stopped: Schema.optionalKey(Schema.Boolean),
   where: Schema.Struct({
     at: Schema.NullOr(Schema.Tuple([Schema.Number, Schema.Number, Schema.Number])),
   }),
@@ -64,6 +66,21 @@ export interface SteppedBotArgs {
   readonly seconds: number;
   /** Step at a person's pace, so the page's frame times are a person's (shell studio.bot). */
   readonly realTime?: boolean;
+  /** Keep the run's last screen beside its trace (the default); a caller that takes its own says false. */
+  readonly endFrame?: boolean;
+}
+
+/** A run with what its caller may show beyond the result: its play, kept id and how it stopped. */
+export interface SteppedRun {
+  readonly result: GameBotRunResult;
+  readonly play: GamePlay | null;
+  /** The kept play's id, which `game_play` op replay takes; null when none was kept. */
+  readonly kept: string | null;
+  /** decide returned false. */
+  readonly stopped: boolean;
+  /** The game's own ending, when the run reached one. */
+  readonly outcome: { readonly won: boolean } | null;
+  readonly wallMs: number;
 }
 
 /** The goal a bot file states (`export const goal = "…"`), else a plain one. */
@@ -76,7 +93,12 @@ const wallMsFor = (seconds: number) => seconds * 1_000 + 30_000;
 export const playSteppedBot = async (
   launch: BotLaunch,
   args: SteppedBotArgs,
-): Promise<GameBotRunResult> => {
+): Promise<GameBotRunResult> => (await runSteppedBot(launch, args)).result;
+
+export const runSteppedBot = async (
+  launch: BotLaunch,
+  args: SteppedBotArgs,
+): Promise<SteppedRun> => {
   const { play } = launch;
   const file = NodePath.relative(args.root, args.botFile);
   const goal = goalOf(args.source);
@@ -97,11 +119,18 @@ export const playSteppedBot = async (
     videoPath: "",
     frames: [] as ReadonlyArray<string>,
   };
-  const unplayed = (note: string): GameBotRunResult => ({
-    ...base,
-    played: false,
-    status: { state: "bot-error", note },
-    message: `Bot "${file}" did not play: ${note}`,
+  const unplayed = (note: string): SteppedRun => ({
+    result: {
+      ...base,
+      played: false,
+      status: { state: "bot-error", note },
+      message: `Bot "${file}" did not play: ${note}`,
+    },
+    play: null,
+    kept: null,
+    stopped: false,
+    outcome: null,
+    wallMs: 0,
   });
   if (play.stepBot === undefined) return unplayed("this game's runner plays no stepped bots.");
   const raw = await play.stepBot(args.source, {
@@ -125,7 +154,14 @@ export const playSteppedBot = async (
       message: `Bot "${file}": unresponsive — ${note}.`,
     };
     await NodeFSP.writeFile(args.tracePath, JSON.stringify({ ...result, file }, null, 2));
-    return result;
+    return {
+      result,
+      play: null,
+      kept: null,
+      stopped: false,
+      outcome: null,
+      wallMs: wallMsFor(args.seconds),
+    };
   }
   const ran = answer.value;
   // The run is a play: kept under the bot run's own id, whatever it ended with.
@@ -141,7 +177,7 @@ export const playSteppedBot = async (
     () => undefined,
   );
   const endFrame = NodePath.join(args.runDir, "frames", END_FRAME);
-  const framed = await play.still(endFrame).catch(() => false);
+  const framed = args.endFrame !== false && (await play.still(endFrame).catch(() => false));
   const findings: Array<GameBotFinding> = [];
   const finding = (detector: string, severity: string, summary: string, detail = "") =>
     findings.push({ detector, severity, summary, t: ran.seconds, pos: ran.where.at, detail });
@@ -158,7 +194,7 @@ export const playSteppedBot = async (
   // The game's own ending is the run's; past its game seconds it ended unended, and past its
   // wall bound (a page slower than real time) it ran out of time.
   const state =
-    ran.outcome !== null || ran.seconds >= args.seconds
+    ran.outcome !== null || ran.seconds >= args.seconds || ran.stopped === true
       ? "done"
       : ran.error
         ? "bot-error"
@@ -166,9 +202,11 @@ export const playSteppedBot = async (
   const note =
     ran.outcome !== null
       ? `the game ended: ${ran.outcome.won ? "won" : "lost"} at ${ran.outcome.seconds} s${ran.outcome.text === "" ? "" : ` (${ran.outcome.text})`}`
-      : state === "done"
-        ? `the game did not end in ${args.seconds} s of play`
-        : `${ran.seconds} s of play in ${wallSeconds.toFixed(0)} s of wall time; the run's wall bound ended it`;
+      : ran.stopped === true
+        ? `decide stopped the run at ${ran.seconds} s`
+        : state === "done"
+          ? `the game did not end in ${args.seconds} s of play`
+          : `${ran.seconds} s of play in ${wallSeconds.toFixed(0)} s of wall time; the run's wall bound ended it`;
   const tag = kept === null ? null : keptRunTag(kept);
   const result: GameBotRunResult = {
     ...base,
@@ -203,7 +241,14 @@ export const playSteppedBot = async (
     args.tracePath,
     JSON.stringify({ ...result, file, play: kept, wallSeconds }, null, 2),
   );
-  return result;
+  return {
+    result,
+    play: Option.getOrNull(decoded),
+    kept,
+    stopped: ran.stopped === true,
+    outcome: ran.outcome,
+    wallMs: ran.wallMs,
+  };
 };
 
 /** A run whose game never booted: measured about the game, with a trace of its own. */

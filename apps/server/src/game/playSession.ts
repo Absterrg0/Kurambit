@@ -22,7 +22,10 @@ export interface PlaySession {
   readonly boot: PlayObservation;
   /** Node counts at boot, where the runner reports them. */
   readonly bootPerf: unknown;
-  /** Runs steps and returns the observation after them; throws when the act failed. */
+  /**
+   * Runs steps and returns the observation after them; throws when the game ended under it. A page
+   * too slow for the act's bounds answers with how far it got (`short`), never as a failure.
+   */
   readonly act: (
     steps: readonly GameExploreStep[],
     screenshotPath: string | null,
@@ -30,6 +33,8 @@ export interface PlaySession {
     /** Where the act's nth labelled `screenshot` step (from 1) writes its frame. */
     framePath?: (n: number) => string,
   ) => Promise<PlayActObservation>;
+  /** The window at another size, as a player's would be. Absent where the runner has no page. */
+  readonly resize?: (width: number, height: number) => Promise<void>;
   /** Writes the picture as it is now to `path`; false when it could not. */
   readonly still: (path: string) => Promise<boolean>;
   /** Keys held from now on (the rest let go), taps and clicks, into the page as it runs. */
@@ -78,9 +83,6 @@ export interface PlayEnd {
   readonly by: "game" | "host";
   readonly detail: string;
 }
-
-/** The game stopped answering within an act's bound: evidence about the build. */
-export class PlayUnresponsive extends Error {}
 
 /** The game's runner went away mid-act: evidence about the build. */
 export class PlayClosed extends Error {}
@@ -140,12 +142,32 @@ export interface PlayObservation {
 
 export interface PlayActObservation extends PlayObservation {
   readonly executedInputSteps: number;
+  /** The act's picture at `screenshotPath`, with its small copy beside it (smallFramePath). */
   readonly screenshot: boolean;
+  /** Game time the act stepped and the wall time that took. */
+  readonly clock?: { readonly gameMs: number; readonly wallMs: number };
+  /** From the act's first input to the first change the probe read (GamePlayResponse). */
+  readonly response?: {
+    readonly gameMs: number | null;
+    readonly wallMs: number | null;
+    readonly watchedMs: number;
+    readonly changed: ReadonlyArray<string>;
+  };
+  /** Where the page fell short of the act, in numbers, when it did. */
+  readonly short?: string;
   /** The frames the act's labelled `screenshot` steps took, in order. */
   readonly frames?: ReadonlyArray<{ readonly label: string; readonly path: string }>;
   readonly uiResults?: ReadonlyArray<GameExploreUiResult>;
   readonly inspections?: ReadonlyArray<GameExploreInspection>;
 }
+
+/**
+ * The small JPEG a play writes beside each PNG frame: what an agent is shown inline, at a fraction
+ * of the full frame's tokens and bytes. The PNG stays for a closer look.
+ */
+export const smallFramePath = (png: string) => png.replace(/\.png$/i, ".jpg");
+/** The small frame's width: a quarter of a 1280×720 frame's pixels. */
+export const SMALL_FRAME_WIDTH = 640;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

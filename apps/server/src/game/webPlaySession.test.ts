@@ -7,7 +7,6 @@ import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
-import { PlayUnresponsive } from "./playSession.ts";
 import { openWebPlaySession } from "./webPlaySession.ts";
 
 /** Playwright's headless shell, where this machine has one; the test skips without it. */
@@ -35,7 +34,7 @@ setTimeout(() => { for (;;) {} }, 500);
 
 describe("web play session", () => {
   it.skipIf(headlessShell === null)(
-    "reads a page whose main thread hangs as not answering, within its bounds",
+    "answers an act on a page whose main thread hangs, in numbers, within its bounds",
     async () => {
       const server = NodeHttp.createServer((_request, response) => {
         response.setHeader("content-type", "text/html");
@@ -61,7 +60,10 @@ describe("web play session", () => {
         });
         await new Promise((resolve) => setTimeout(resolve, 800));
         const started = Date.now();
-        await expect(session.act([{ waitMs: 100 }], null)).rejects.toBeInstanceOf(PlayUnresponsive);
+        // Slow is said in numbers, and the session stays for the next act.
+        const answered = await session.act([{ waitMs: 100 }], null);
+        expect(answered.probe).toBeNull();
+        expect(answered.short).toMatch(/took over \d/);
         // A play and its launch both close the session: neither may surface a raw
         // "Target closed" from a page our own bound gave up on.
         await session.close();

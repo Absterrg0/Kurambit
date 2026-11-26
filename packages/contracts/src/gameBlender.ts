@@ -60,7 +60,8 @@ export const GameBlenderLookInput = Schema.Struct({
 });
 export type GameBlenderLookInput = typeof GameBlenderLookInput.Type;
 export const GameBlenderLookScreenshot = Schema.Struct({
-  mimeType: Schema.Literal("image/png"),
+  /** JPEG for a play's small frames, which cost an agent a fraction of a PNG's bytes. */
+  mimeType: Schema.Literals(["image/png", "image/jpeg"]),
   data: Schema.String,
   width: Schema.Number,
   height: Schema.Number,

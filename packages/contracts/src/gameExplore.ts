@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { GamePlaytestProbe, GamePlaytestStep, GameConsoleMessage } from "./game.ts";
+import { GamePlayMark } from "./gamePlays.ts";
 
 /**
  * Exploration: short act/observe cycles in one browser session on the game's
@@ -29,6 +30,13 @@ export const GAME_EXPLORE_BOUNDS = {
   maxErrorsPerAct: 20,
   /** Values kept per inspect step. */
   maxInspectValues: 64,
+  /** One hold or key step's game time; a plain wait may take the whole act's. */
+  maxStepMs: 10_000,
+  /** Game seconds a scripted act plays when it names none, and the most it may. */
+  defaultScriptSeconds: 60,
+  maxScriptSeconds: 300,
+  /** Probe marks a scripted act answers with, spread over its run. */
+  maxTrailMarks: 20,
 } as const;
 
 const sessionId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
@@ -143,15 +151,51 @@ export const GameExploreActInput = Schema.Struct({
 export type GameExploreActInput = typeof GameExploreActInput.Type;
 
 /**
+ * A scripted act: a module that exports `decide(obs)`, played by the page's stepped runner (shell
+ * studio.bot) on a fresh run, each fixed step, pressing the player's own controls.
+ */
+export const GamePlayScript = Schema.Struct({
+  file: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
+      description: "A .mjs under .studio/bot/.",
+    }),
+  ),
+  source: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
+      description: "Or the module's source inline.",
+    }),
+  ),
+  seconds: Schema.optionalKey(
+    Schema.Finite.annotate({ description: "Game seconds before it stops; 60 when omitted, ≤300." }),
+  ),
+});
+export type GamePlayScript = typeof GamePlayScript.Type;
+
+/** The session page's size, as a player's window would be. */
+export const GamePlayViewport = Schema.Struct({
+  width: Schema.Int.check(Schema.isBetween({ minimum: 320, maximum: 1920 })),
+  height: Schema.Int.check(Schema.isBetween({ minimum: 240, maximum: 1080 })),
+});
+export type GamePlayViewport = typeof GamePlayViewport.Type;
+
+/**
  * `game_play` op `act`: input batches in this thread's session; with no `sessionId` it opens one
  * (what op start did) and acts in it. A browser game takes the shared playtest steps only.
  */
 export const GamePlayActInput = Schema.Struct({
   sessionId: Schema.optionalKey(sessionId),
-  steps: Schema.Array(GamePlaytestStep).check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(GAME_EXPLORE_BOUNDS.maxStepsPerCall),
+  /** Input steps, or `decide`: one of the two. */
+  steps: Schema.optionalKey(
+    Schema.Array(GamePlaytestStep).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(GAME_EXPLORE_BOUNDS.maxStepsPerCall),
+    ),
   ),
+  decide: Schema.optionalKey(GamePlayScript),
+  viewport: Schema.optionalKey(GamePlayViewport),
+  includeImage: Schema.optionalKey(Schema.Boolean).annotate({
+    description: "true: each screenshot step's frame too; false: no picture.",
+  }),
   ...GameExploreStartInput.fields,
 });
 export type GamePlayActInput = typeof GamePlayActInput.Type;
@@ -171,6 +215,36 @@ export type GameEvalInput = typeof GameEvalInput.Type;
 
 export const GameEvalResult = Schema.Struct({ sessionId, value: Schema.Unknown });
 export type GameEvalResult = typeof GameEvalResult.Type;
+
+/** Game time the page stepped, and the wall time that stepping took. */
+export const GamePlayClock = Schema.Struct({ gameMs: Schema.Number, wallMs: Schema.Number });
+export type GamePlayClock = typeof GamePlayClock.Type;
+
+/**
+ * From an act's first input to the first change the probe read, in game and wall time, and what
+ * changed (`player`, a GameState key, `hud`); null times when nothing changed while it watched.
+ * Anything that moves on its own (a timer, gravity) counts: `changed` says what it was.
+ */
+export const GamePlayResponse = Schema.Struct({
+  gameMs: Schema.NullOr(Schema.Number),
+  wallMs: Schema.NullOr(Schema.Number),
+  watchedMs: Schema.Number,
+  changed: Schema.Array(Schema.String),
+});
+export type GamePlayResponse = typeof GamePlayResponse.Type;
+
+/** A scripted act's run: how it ended, its numbers, the play to replay, and its probe trail. */
+export const GamePlayScriptRun = Schema.Struct({
+  ended: Schema.Literals(["won", "lost", "stopped", "seconds", "wall", "error"]),
+  note: Schema.String,
+  seconds: Schema.Number,
+  wallMs: Schema.Number,
+  decisions: Schema.Number,
+  /** The kept run's id: `replay` {"run": id, "at": s} shows a moment, {"save": name, "run": id} makes it a test play. */
+  run: Schema.NullOr(Schema.String),
+  trail: Schema.Array(GamePlayMark),
+});
+export type GamePlayScriptRun = typeof GamePlayScriptRun.Type;
 
 export const GameExploreActResult = Schema.Struct({
   sessionId,
@@ -201,6 +275,11 @@ export const GameExploreActResult = Schema.Struct({
   /** Console messages since the previous act, bounded. */
   consoleMessages: Schema.Array(GameConsoleMessage),
   consoleTruncated: Schema.Int,
+  /** The page's size this act played at. */
+  viewport: Schema.optionalKey(GamePlayViewport),
+  clock: Schema.optionalKey(GamePlayClock),
+  response: Schema.optionalKey(GamePlayResponse),
+  script: Schema.optionalKey(GamePlayScriptRun),
   message: Schema.String,
 });
 export type GameExploreActResult = typeof GameExploreActResult.Type;
@@ -213,6 +292,8 @@ export const GameExploreCloseResult = Schema.Struct({
   reason: Schema.String,
   actions: Schema.Int,
   totalNominalMs: Schema.Number,
+  /** Every act's stepping together. */
+  clock: Schema.optionalKey(GamePlayClock),
   message: Schema.String,
 });
 export type GameExploreCloseResult = typeof GameExploreCloseResult.Type;
@@ -254,8 +335,15 @@ const BROWSER_KEY_NAMES: ReadonlySet<string> = new Set([
   "PageDown",
   "Insert",
   "Delete",
+  "Meta",
   ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
 ]);
+/**
+ * KeyboardEvent codes, as a game's `ACTIONS` names its keys ("KeyW", "ShiftLeft", "Digit1"):
+ * the browser presses them as the physical key.
+ */
+const BROWSER_KEY_CODE =
+  /^(?:Key[A-Z]|Digit\d|Numpad(?:\d|Add|Subtract|Multiply|Divide|Decimal|Enter)|(?:Shift|Control|Alt|Meta)(?:Left|Right)|Minus|Equal|Bracket(?:Left|Right)|Backslash|Semicolon|Quote|Backquote|Comma|Period|Slash|CapsLock)$/;
 
 const exploreStepDurationMs = (step: GameExploreStep): number => {
   if ("press" in step) return 50;
@@ -275,8 +363,11 @@ export const exploreStepIssues = (steps: readonly GameExploreStep[]): readonly s
     const duration = exploreStepDurationMs(step);
     if (!Number.isFinite(duration) || duration < 0)
       issues.push(`Step ${index + 1} has an invalid duration.`);
-    if (Number.isFinite(duration) && duration > 10_000)
-      issues.push(`Step ${index + 1} lasts ${duration} ms; one step may last at most 10000 ms.`);
+    // A plain wait may take the act's whole game time; a held key is a press, not a wait.
+    const most =
+      "waitMs" in step ? GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall : GAME_EXPLORE_BOUNDS.maxStepMs;
+    if (Number.isFinite(duration) && duration > most)
+      issues.push(`Step ${index + 1} lasts ${duration} ms; this step may last at most ${most} ms.`);
     const fields: ReadonlyArray<readonly [string, readonly string[]]> =
       "press" in step
         ? [["press", [step.press]]]
@@ -293,9 +384,9 @@ export const exploreStepIssues = (steps: readonly GameExploreStep[]): readonly s
           issues.push(`Step ${index + 1} ${field} must contain 1–80 characters.`);
           continue;
         }
-        if (key.length === 1 || BROWSER_KEY_NAMES.has(key)) continue;
+        if (key.length === 1 || BROWSER_KEY_NAMES.has(key) || BROWSER_KEY_CODE.test(key)) continue;
         issues.push(
-          `Step ${index + 1} ${field} "${key}" is not a browser key. Exploration sends physical keys such as "Enter", "Space", "ArrowLeft", "w" or "F1", not input action names; use the key the game binds to the action.`,
+          `Step ${index + 1} ${field} "${key}" is not a browser key. Exploration sends physical keys such as "Enter", "Space", "ArrowLeft", "w", "KeyW" or "ShiftLeft", not input action names; use the key the game binds to the action.`,
         );
       }
   }

@@ -319,9 +319,11 @@ capabilities and plays discrete acts with the game paused between them (explorat
 own runs (the QA play, replays, the stepped masher) play on the run's own clock inside it. An
 engine adds only how a session launches. Every wait a session makes has a bound (`PLAY_BOUNDS` in
 [playSession.ts](../../apps/server/src/game/playSession.ts)), including every call into a web
-page, and its end says by whose side: a game that exits, crashes or stops answering is evidence
-about the build (a run ends `crashed` or `unresponsive` with its trace), while our display or
-browser going away is a tool fault.
+page, and its end says by whose side: a game that exits or crashes is evidence about the build
+(a run ends `crashed` or `unresponsive` with its trace), while our display or browser going away
+is a tool fault. An act or eval on a page too slow for its bounds is neither: it answers with how
+far it got in game and wall time and the session stays. In software those bounds are scaled by
+the page's frame cost, measured before its first act, because there one frame can cost a second.
 
 - three.js has no runner process. The browser host speaks the protocol to the page through the
   shell's `window.__studio` bridge, which the game owns and may have edited, so the protocol stays in
@@ -653,9 +655,12 @@ cannot both find none.
   back from or skipped from the game's decisions (`decidedKeys`), and passes over them the same
   way: a person's undone turn carries the `next:` key of its request, so the Next line it acted on
   is not proposed again.
-- **No play bot.** Kurambit measures with its own stepped masher and the person's saved test plays;
-  agents write no bots. A bot cost minutes of a model's time per game, and one real-time run said
-  little that the masher and a saved winning run do not. `.studio` is outside `restoredPaths`, so
+- **No play bot.** Kurambit measures with its own stepped masher and the person's saved test plays.
+  A bot cost minutes of a model's time per game, and one real-time run said little that the masher
+  and a saved winning run do not. An agent's `decide` script plays only inside its own `game_play`
+  act, on the masher's stepped runner, so it can reach late content without an autopilot in the
+  game; its run is kept as any played run is, and never becomes a fact, a Checks row or a Keep
+  going setup. `.studio` is outside `restoredPaths`, so
   the `.studio/bot` an earlier Kurambit wrote stays as it is through an undo. Games from earlier
   runs keep their `game-builds/bots/<run>` setup points, which list as the build they were written
   on.

@@ -75,6 +75,7 @@ import { besideReference, gameReference } from "../../../game/gameReference.ts";
 import { fill, STUDIO_TEXT } from "../../../game/studioText.ts";
 import { present, refusal, type GameToolRefusal } from "./results.ts";
 import { verdictOf } from "./verdicts.ts";
+import { SMALL_FRAME_WIDTH, smallFramePath } from "../../../game/playSession.ts";
 
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
@@ -424,22 +425,42 @@ const replayMoment = (input: { readonly run: string; readonly at?: number }) =>
   );
 
 /**
- * An act, with its pictures as images: the frames its labelled screenshot steps took, in route
- * order, then the picture it ended on. Agents read the closing picture after almost every act
- * (7 of 10 in Gutterlight's first turn), each a round trip of its own.
+ * An act, with its picture as an image: by default only the frame it ended on, small and JPEG
+ * (a full PNG per frame was most of what long chats paid for). `includeImage: true` in the act
+ * adds each labelled screenshot step's frame, in route order; every frame's full PNG stays at its
+ * path for a closer look.
  */
 const playAct = (act: GamePlayActInput) =>
   Effect.gen(function* () {
     const result = yield* withGame(GameExplore.GameExplore, (explore, threadId) =>
       explore.play(threadId, act),
     );
+    if (act.includeImage === false) return result;
     const paths = [
-      ...(result.frames ?? []).map((frame) => frame.path),
+      ...(act.includeImage === true ? (result.frames ?? []).map((frame) => frame.path) : []),
       ...(result.screenshotPath === null ? [] : [result.screenshotPath]),
     ];
     if (paths.length === 0) return result;
+    const viewport = result.viewport ?? THREE_VIEWPORT;
+    const width = Math.min(SMALL_FRAME_WIDTH, viewport.width);
+    const small = {
+      width,
+      height: Math.round((viewport.height * width) / viewport.width),
+    };
     const shots = yield* Effect.promise(() =>
-      Promise.all(paths.map((path) => NodeFSP.readFile(path).then(png, () => null))),
+      Promise.all(
+        paths.map((path) =>
+          NodeFSP.readFile(smallFramePath(path)).then(
+            (bytes) => ({
+              mimeType: "image/jpeg" as const,
+              data: bytes.toString("base64"),
+              ...small,
+            }),
+            // A frame with no small copy (the encoder failed) is shown as it was taken.
+            () => NodeFSP.readFile(path).then(png, () => null),
+          ),
+        ),
+      ),
     );
     const screenshots = shots.filter((shot) => shot !== null);
     return screenshots.length === 0 ? result : { ...result, screenshots };

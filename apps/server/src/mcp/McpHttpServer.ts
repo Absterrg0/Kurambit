@@ -518,7 +518,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
               const snapshot = encodedResult as SnapshotMetadata & {
                 readonly url: string;
                 readonly screenshot: {
-                  readonly mimeType: "image/png";
+                  readonly mimeType: "image/png" | "image/jpeg";
                   readonly data: string;
                   readonly width: number;
                   readonly height: number;
@@ -593,14 +593,14 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
 
 interface ImageToolResult {
   readonly screenshot?: {
-    readonly mimeType: "image/png";
+    readonly mimeType: "image/png" | "image/jpeg";
     readonly data: string;
     readonly width: number;
     readonly height: number;
   };
   /** Tools that return several annotated frames. */
   readonly screenshots?: ReadonlyArray<{
-    readonly mimeType: "image/png";
+    readonly mimeType: "image/png" | "image/jpeg";
     readonly data: string;
     readonly width: number;
     readonly height: number;
