@@ -766,34 +766,31 @@ export function GameFrame({
 
 /**
  * Over a game held while the person is elsewhere: the whole picture is the button, so the first
- * click plays instead of reaching a title's buttons or pointing at a thing. It says why the game
- * waits, where the reason is worth knowing.
+ * click plays instead of reaching a title's buttons or pointing at a thing. Where the reason the
+ * game waits is worth knowing, it is in the same small label: a second strip across the picture
+ * sat over the game's own title on a small Stage.
  */
 function ClickToPlay({ onPlay }: { onPlay: () => void }) {
   return (
     <button
       type="button"
       data-game-click-to-play=""
-      className="absolute inset-0 z-20 flex cursor-pointer flex-col items-center justify-center gap-1 bg-black/25 p-4 text-stage-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+      className="absolute inset-0 z-20 flex cursor-pointer items-center justify-center bg-black/25 p-4 text-stage-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
       onClick={onPlay}
     >
-      <span className="flex items-center gap-2 rounded-full bg-black/75 py-1.5 ps-3 pe-4 ring-1 ring-white/15">
-        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
-        <Text variant="label" tone="inherit">
-          Click to play
-        </Text>
+      <span className="flex max-w-64 flex-col items-center rounded-2xl bg-black/75 px-4 py-1.5 text-center ring-1 ring-white/15">
+        <span className="flex items-center gap-2">
+          <PlayIcon className="size-4 fill-current" aria-hidden="true" />
+          <Text variant="label" tone="inherit">
+            Click to play
+          </Text>
+        </span>
+        {rendererIsSoftware() ? (
+          <Text variant="caption" tone="inherit" render={<span className="text-stage-muted" />}>
+            Paused while you're away: with no graphics card, playing uses most of the processor
+          </Text>
+        ) : null}
       </span>
-      <Text
-        variant="caption"
-        tone="inherit"
-        render={
-          <span className="max-w-full truncate rounded-md bg-black/60 px-2 text-stage-muted" />
-        }
-      >
-        {rendererIsSoftware()
-          ? "Paused while you're away: with no graphics card, playing uses most of the processor"
-          : "Paused while you're away from the game"}
-      </Text>
     </button>
   );
 }
