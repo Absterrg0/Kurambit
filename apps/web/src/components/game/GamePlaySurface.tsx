@@ -83,6 +83,12 @@ const SLOW_START_MS = 15_000;
 const START_PATIENCE_MS = 45_000;
 /** How long a ready frame may run unseen without saying it drew, before it is shown anyway. */
 const RUNNING_PATIENCE_MS = 4_000;
+/**
+ * Under the first build's card, how often a save's frame that came up blank or threw loads again
+ * when no newer save came: the agent may have fixed it since, and the save that would say so can
+ * be missed (the server's watch of the folder died).
+ */
+const PROBE_RETRY_MS = 20_000;
 /** One save's frame: the key it is mounted by and the page it loads. */
 interface FrameSave {
   readonly key: string;
@@ -170,7 +176,13 @@ export function GamePlaySurface({
   // and it takes the Stage when it says it drew a frame that way: a held page's first frame is
   // from before its run moved (a camera not placed yet), and is not the game to show.
   const [starting, setStarting] = useState<
-    (FrameSave & { readonly settled: boolean; readonly running: boolean }) | null
+    | (FrameSave & {
+        readonly settled: boolean;
+        readonly running: boolean;
+        /** It booted with no game yet (no main.js): nothing to reload until the agent writes one. */
+        readonly blank?: boolean;
+      })
+    | null
   >(null);
   const pending =
     follow && starting !== null && !starting.settled && drawn?.key !== starting.key
@@ -180,8 +192,8 @@ export function GamePlaySurface({
     if (starting !== null) setStarting(null);
   } else if (latest !== null && pending === null && starting?.key !== latest.key)
     setStarting({ ...latest, settled: false, running: false });
-  const settle = (key: string) =>
-    setStarting((now) => (now?.key === key ? { ...now, settled: true } : now));
+  const settle = (key: string, blank = false) =>
+    setStarting((now) => (now?.key === key ? { ...now, settled: true, blank } : now));
   const overdue = pending !== null && latest !== null && pending.key !== latest.key;
   const pendingKey = pending?.key ?? null;
   useEffect(() => {
@@ -225,7 +237,7 @@ export function GamePlaySurface({
     }
     if (follow && message.type === "studio-ready") {
       // A game with no main.js yet boots and draws nothing: the Stage waits for one that does.
-      if (message.blank === true) settle(next.key);
+      if (message.blank === true) settle(next.key, true);
       else if (unseen)
         setStarting((now) => (now?.key === next.key ? { ...now, running: true } : now));
       else show(next);
@@ -247,6 +259,42 @@ export function GamePlaySurface({
     const timer = window.setTimeout(showRunning, RUNNING_PATIENCE_MS);
     return () => window.clearTimeout(timer);
   }, [runningKey, showRunning]);
+  // A frame loaded again is a new page under the same save: its React key carries the attempt.
+  const [retry, setRetry] = useState<{ readonly key: string; readonly n: number } | null>(null);
+  const mountKey = (key: string) => (retry?.key === key ? `${key}\0${retry.n}` : key);
+  const loadAgain = useStableCallback((key: string) => {
+    setRetry((now) => ({ key, n: now?.key === key ? now.n + 1 : 1 }));
+    setThrew((now) => (now?.key === key ? null : now));
+    setStarting((now) =>
+      now?.key === key ? { ...now, settled: false, running: false, blank: false } : now,
+    );
+  });
+  // Under the card, the newest save's frame came up blank or threw and nothing newer came.
+  const stuckKey =
+    probing && starting !== null && starting.settled && starting.key === latest?.key
+      ? starting.key
+      : null;
+  useEffect(() => {
+    if (stuckKey === null) return;
+    const timer = window.setTimeout(() => loadAgain(stuckKey), PROBE_RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [stuckKey, loadAgain]);
+  // A game that is there but has not drawn as long as a start may take: the card offers what a
+  // starting game's does, a reload. A blank page has no game to reload yet.
+  const probeKey =
+    probing && starting !== null && starting.blank !== true
+      ? `${mountKey(starting.key)}\0${starting.settled}`
+      : null;
+  const [slowProbe, setSlowProbe] = useState<string | null>(null);
+  useEffect(() => {
+    if (probeKey === null) return;
+    const timer = window.setTimeout(() => setSlowProbe(probeKey), SLOW_START_MS);
+    return () => window.clearTimeout(timer);
+  }, [probeKey]);
+  const reloadProbe =
+    probeKey !== null && slowProbe === probeKey && starting !== null
+      ? () => loadAgain(starting.key)
+      : null;
   // The kept frame said ready long ago, and what it throws is about to be replaced: only the
   // runs played on it are still heard.
   const onKeptMessage = (message: StudioMessage) => {
@@ -296,7 +344,7 @@ export function GamePlaySurface({
                 to kept, and only the newest one talks to the Stage. */}
             {frames.map((each) => (
               <div
-                key={each.key}
+                key={mountKey(each.key)}
                 inert={each.role === "unseen"}
                 className={
                   each.role === "unseen"
@@ -339,6 +387,7 @@ export function GamePlaySurface({
                 onStop={onStop}
                 onAskAgent={onAskAgent}
                 onOpenTools={onOpenTools}
+                onReload={reloadProbe}
               />
             )}
             {playing ? overlay : null}
@@ -837,6 +886,7 @@ function StageStateCard({
   onStop,
   onAskAgent,
   onOpenTools,
+  onReload,
 }: {
   gameName: string;
   phase: GameStagePhase;
@@ -847,6 +897,8 @@ function StageStateCard({
   onStop: () => void;
   onAskAgent: (error: string) => void;
   onOpenTools: () => void;
+  /** The first build's game is there but slow to show: load it again. */
+  onReload: (() => void) | null;
 }) {
   if (phase.kind === "playing") return null;
   return (
@@ -903,8 +955,16 @@ function StageStateCard({
           // Stage shows the agent at work: the Stage only says where the game will appear.
           <div className="flex max-w-md flex-col items-center gap-3">
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
-              The game plays here as soon as your agent has it running.
+              {onReload === null
+                ? "The game plays here as soon as your agent has it running."
+                : "The game is taking longer than usual to start."}
             </Text>
+            {onReload === null ? null : (
+              <Button size="sm" variant="outline" onClick={onReload}>
+                <RefreshCwIcon aria-hidden="true" />
+                Reload the game
+              </Button>
+            )}
           </div>
         ) : null}
         {phase.kind === "building" ? (
