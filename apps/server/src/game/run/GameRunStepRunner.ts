@@ -39,7 +39,11 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 
-import { stepMessage } from "../../orchestration-v2/gameRun/decide.ts";
+import {
+  directionFinished,
+  isStepRecord,
+  stepMessage,
+} from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   stepCapCommandId,
@@ -310,10 +314,15 @@ const make = Effect.gen(function* () {
       const next = yield* nextLine(threadId);
       // Fresh eyes only when nothing else says what to do: the person's picture while it still
       // differs, their direction, and the agent's own `Next:` all go first, and a model call no
-      // step would take is tokens spent on nothing.
+      // step would take is tokens spent on nothing. Once their direction is done, none would.
+      const records = rounds
+        .filter((r) => r.runId === located.run.id)
+        .map((r) => r.round)
+        .filter(isStepRecord);
       const fresh =
         (critique !== null && critique !== "none") ||
         located.run.steer.length > 0 ||
+        directionFinished(located.run.steer, records) ||
         (next !== null && next !== "none")
           ? undefined
           : yield* freshLook(threadId, root);

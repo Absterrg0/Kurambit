@@ -571,11 +571,26 @@ const freshProposal = (look: LookResult): GameRunProposal | null => {
 };
 
 /**
+ * PURE. The person gave this run a direction and its steps finished all of it. From then on only
+ * measured evidence earns a step: the agent's own `Next:` and fresh eyes are taste, and runs whose
+ * direction was done went on taking them, each "kept: no fact got worse", until a person pressed
+ * Stop.
+ */
+export const directionFinished = (
+  steer: ReadonlyArray<string>,
+  records: ReadonlyArray<StepRecord>,
+): boolean => steer.length === 0 && records.some((r) => r.step.why === "steer");
+
+/** Why a run whose direction is done ends, as its last line reads. */
+const DIRECTION_FINISHED = "your direction is done, and no check found a problem a step should fix";
+
+/**
  * The order of evidence, the person's first: their direction (with what the
  * step before left of it), a step the time cap cut off, a blocker, a retry of
  * an undone step, the picture they asked to match while it still differs, a
  * failing fact a player would hit, the agent's own next line, and only when
- * none is left the biggest problem fresh eyes saw. Every candidate whose key
+ * none is left the biggest problem fresh eyes saw; those last two never once
+ * the person's direction is done (`directionFinished`). Every candidate whose key
  * is set aside is passed over. Null: nothing left to propose. The play bot is
  * no candidate: a step must change what a person sees or fix a measured fault.
  */
@@ -585,6 +600,21 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
   const facts = look.facts;
   const views = facts === null ? null : viewsOf(facts);
   const earlier = look.earlier === undefined ? null : viewsOf(look.earlier);
+  const taste: Array<() => GameRunProposal | null> = [
+    () => {
+      const text = look.next === null || look.next === "none" ? "" : look.next.text.trim();
+      if (text.length === 0) return null;
+      const line = clip(text, TEXT_MAX);
+      return { why: "next", text: line, target: null, key: nextKey(line) };
+    },
+    // Taste from screenshots: never ahead of the person's or the agent's own plan.
+    () => freshProposal(look),
+    // No `Next:` line at all: the agent's plan is to improve the game.
+    () =>
+      look.next === null
+        ? { why: "next", text: NEXT_FALLBACK, target: null, key: nextKey(NEXT_FALLBACK) }
+        : null,
+  ];
   const candidates: Array<() => GameRunProposal | null> = [
     () => directionProposal(state, look),
     () => finishProposal(state),
@@ -625,19 +655,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
         (["retry", "hud", "screens", "saved-plays"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
-    () => {
-      const text = look.next === null || look.next === "none" ? "" : look.next.text.trim();
-      if (text.length === 0) return null;
-      const line = clip(text, TEXT_MAX);
-      return { why: "next", text: line, target: null, key: nextKey(line) };
-    },
-    // Taste from screenshots: never ahead of the person's or the agent's own plan.
-    () => freshProposal(look),
-    // No `Next:` line at all: the agent's plan is to improve the game.
-    () =>
-      look.next === null
-        ? { why: "next", text: NEXT_FALLBACK, target: null, key: nextKey(NEXT_FALLBACK) }
-        : null,
+    ...(directionFinished(state.steer, state.records) ? [] : taste),
   ];
   for (const candidate of candidates) {
     const proposal = candidate();
@@ -751,14 +769,16 @@ export const applyLook = (state: RunState, look: LookResult): Next => {
   if (!fitsBudget(state)) return end(state, "budget", "", "the budget holds no other step");
   const proposal = propose(state, look);
   if (proposal === null)
-    return look.next === "none"
-      ? end(state, "done", "", "nothing to propose, and the agent says Next: none")
-      : end(
-          state,
-          "stalled",
-          "every step left to propose was set aside",
-          "every step left to propose was set aside",
-        );
+    return directionFinished(state.steer, state.records)
+      ? end(state, "done", DIRECTION_FINISHED, "the direction is done and nothing measured is bad")
+      : look.next === "none"
+        ? end(state, "done", "", "nothing to propose, and the agent says Next: none")
+        : end(
+            state,
+            "stalled",
+            "every step left to propose was set aside",
+            "every step left to propose was set aside",
+          );
   return startTurn(state, proposal, look.current);
 };
 
@@ -840,7 +860,8 @@ const targetStillBad = (turn: GameRunTurnStep, build: GameBuildFacts | null) =>
  * with game files changed. That is all the harness can honestly say: whether
  * a kept boss or a new sound helps the game is taste, the person's call, and
  * a fact that stays flat is no evidence either way. So the run stops on what
- * it measures: the agent's own `Next: none`, two steps in a row that kept
+ * it measures: the agent's own `Next: none`, the person's direction done with
+ * nothing measured left to fix, two steps in a row that kept
  * nothing (undone, or no game file changed), or the budget.
  */
 export const gain = (input: {

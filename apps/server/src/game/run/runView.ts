@@ -54,7 +54,9 @@ const endingWhy = (run: GameRun): string => {
     case "budget":
       return `Keep going paused: ${run.budgetMinutes === null ? "its time" : `its ${budgetText(run.budgetMinutes)} of work`} is up.`;
     case "done":
-      return "Keep going finished: your agent says the game is done. Ask it for more to keep going.";
+      return why === ""
+        ? "Keep going finished: your agent says the game is done. Ask it for more to keep going."
+        : `Keep going finished: ${why}. Give it a new direction to keep going.`;
     case "usage-limit":
       return `Keep going paused: ${why === "" ? "the provider's usage limit is reached" : why}. Turn it on again once it resets.`;
     case "provider-down":

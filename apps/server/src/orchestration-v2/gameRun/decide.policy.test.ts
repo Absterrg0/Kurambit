@@ -446,6 +446,27 @@ describe("the person's direction", () => {
     expect(judge(state({ steer: ["a"] }), cycle(asked(["a"]))).state.steer).toEqual(["a"]);
   });
 
+  // Both cycle-4 ruler runs had the direction done at step 2, then took 6 more taste steps, all
+  // "kept: no fact got worse", until Stop.
+  it("once done, ends the run unless a measured fault earns a step", () => {
+    const finished = Loop.applyJudge(
+      state({ steer: ["a"] }),
+      cycle(asked(["a"]), turnResult({ done: true })),
+      { kind: "judge", base: facts(), build: { ...facts(), build: BUILD } },
+      NOW,
+    ).state;
+    for (const left of [look(), look({ next: null, fresh: { text: "The ship is a pale blob" } })]) {
+      const ended = Loop.applyLook(finished, left);
+      expect(ended.plan).toBeNull();
+      expect(ended.state.ending).toBe("done");
+      expect(ended.state.lastFailure).toContain("your direction is done");
+    }
+    const crashing = facts({ masher: tier("crashed", 12) });
+    expect(Loop.propose(finished, look({ facts: crashing }))?.why).toBe("blocker");
+    // More words from the person are a direction again.
+    expect(Loop.propose({ ...finished, steer: ["b"] }, look())?.why).toBe("steer");
+  });
+
   it("is told apart from a reply's prose", () => {
     expect(Loop.directionDone("Added the queen.\n\nDirection: done\nNext: none")).toBe(true);
     expect(Loop.directionDone("- **Direction: done**")).toBe(true);

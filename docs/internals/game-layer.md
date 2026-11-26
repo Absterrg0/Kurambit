@@ -641,7 +641,10 @@ cannot both find none.
   `stalled`; three steps in a row that never landed (a superseded proposal or turn, a turn that
   started on another build) pause it `stalled` with why, so no mix of supersedes and looks runs
   without bound; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
-  otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
+  otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`,
+  and so does a finished direction (`directionFinished`) with no measured step left: after it the
+  `Next:` line and fresh eyes are taste, and runs went on taking them, every step "kept: no fact got
+  worse", until a person pressed Stop.
   While the budget has a minute left another turn starts, capped at the time left (at most
   15 min) and told so when that is shorter, and it is what bounds a run that keeps adding
   content: a fixed "typical step" ended runs with minutes unused. Both clocks count work, never

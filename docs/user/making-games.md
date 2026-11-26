@@ -243,7 +243,8 @@ Your messages always go first: a message you send is an ordinary turn, never jud
 keep going waits for it to end. Stopping a step's turn with the chat's Stop pauses keep going.
 
 Keep going stops by itself when two steps in a row are undone or change nothing, when its budget is
-up, or when nothing is left to propose and your agent says `Next: none`. It does not judge whether a change made the game better:
+up, when nothing is left to propose and your agent says `Next: none`, or once your direction is
+done and no check finds a problem to fix: after that it takes no step on your agent's own ideas. It does not judge whether a change made the game better:
 that is yours to say. The banner above the composer says why in one line, until you send your next
 message, and **Resume** (or turning it on again) carries on with the same run and its direction;
 turning it on with new words replaces the direction. **See what it did** there, or
