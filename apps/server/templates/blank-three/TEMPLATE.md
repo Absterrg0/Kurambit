@@ -2,8 +2,8 @@
 
 `web/` is the game, and it is yours to make however the brief is best made. Kurambit's bridge
 (loaded by `web/index.html`; keep its import map and its two script tags) runs `web/main.js` for
-the Stage, Tune, Controls, the checks and replays, and draws nothing itself. Until `main.js`
-exists the page runs nothing. This is all the bridge needs from it:
+the Stage, Tune, Controls, the checks and replays, and draws nothing itself. `main.js` starts as
+a running stand-in, so the Stage shows a frame at once. This is all the bridge needs from it:
 
 1. **A run.** `main.js` exports `start(ctx)`, which builds a run into `ctx.scene` and
    `ctx.camera` (both fresh each run; `ctx.renderer` draws them), and `update(dt, ctx)`, which

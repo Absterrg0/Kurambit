@@ -2,7 +2,7 @@
   "heading": "## The first turn",
   "goal": "Goal: the person plays the game the brief describes on the Stage, made as well as you can make it: every part a player sees is yours to design.",
   "read": "Read `BRIEF.md` and the bridge contract in `TEMPLATE.md` (what the harness needs from the game, nothing about how it looks), then build the game in `web/`. Write no plan or design document.",
-  "watched": "The person watches the Stage while you work: it shows the game from the first frame it draws and follows every save. Get a scene they can see running first, then grow the game in place.",
+  "watched": "The person watches the Stage while you work: it shows the game from the first frame it draws and follows every save. `web/main.js` is a running stand-in: replace its scene with the game's first, then grow the game in place.",
   "made": {
     "any": "made where each comes out best: Blender for characters, creatures and anything sculpted or hard-surface (studio-skills/art-pipeline.md), three.js code for what is quicker there, one at a time once the game plays, each replacing a quick stand-in when it looks better",
     "blender": "made in Blender (studio-skills/art-pipeline.md), after the whole game plays with quick models in code standing in, one at a time, each replacing its stand-in once it looks better",

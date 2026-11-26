@@ -109,7 +109,7 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
   if (manifest.engine.name !== "three") return undefined;
   const { route, library } = gameModelChoice(manifest);
   // The Stage follows the first turn's saves from the first frame the game draws (GameStage
-  // `makingFirstBuild`), so `watched` asks for a running scene first.
+  // `makingFirstBuild`), so `watched` has the agent replace the running stand-in first.
   return [FIRST.heading, FIRST.goal, FIRST.read, FIRST.watched, routeLine(route, library)].join(
     "\n\n",
   );
