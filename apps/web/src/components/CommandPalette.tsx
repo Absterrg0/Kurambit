@@ -1621,6 +1621,7 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  const developerItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
   if (isGameThread && activeThreadRef !== null) {
     const threadRef = activeThreadRef;
     const runGameAction = (action: GameAction) => async (): Promise<void> => {
@@ -1840,9 +1841,10 @@ function OpenCommandPaletteDialog(props: {
         shortcutCommand: "game.responsive.toggle",
         run: async () => useGameWorkspaceStore.getState().toggleStageDevice(stageThreadKey),
       });
+    // The dev views are maintainer tools: under Developer, with keys that work while playing.
     if (stageCapabilities.includes("dev")) {
       if (stageFrozen)
-        actionItems.push({
+        developerItems.push({
           kind: "action",
           value: "action:game-step-frame",
           title: "Step frozen game one frame",
@@ -1851,7 +1853,7 @@ function OpenCommandPaletteDialog(props: {
           shortcutCommand: "game.stepFrame",
           run: async () => void stepStageFrame(stageThreadKey),
         });
-      actionItems.push({
+      developerItems.push({
         kind: "action",
         value: "action:game-free-camera",
         title: stageDevViews.freeCamera ? "Turn free camera off" : "Turn free camera on",
@@ -1860,7 +1862,7 @@ function OpenCommandPaletteDialog(props: {
         shortcutCommand: "game.freeCamera.toggle",
         run: async () => void toggleStageDevView(stageThreadKey, "freeCamera"),
       });
-      actionItems.push({
+      developerItems.push({
         kind: "action",
         value: "action:game-bounds",
         title: stageDevViews.bounds ? "Hide bounds" : "Show bounds",
@@ -1869,7 +1871,7 @@ function OpenCommandPaletteDialog(props: {
         shortcutCommand: "game.bounds.toggle",
         run: async () => void toggleStageDevView(stageThreadKey, "bounds"),
       });
-      actionItems.push({
+      developerItems.push({
         kind: "action",
         value: "action:game-frame-rate",
         title: stageDevViews.perf ? "Hide frame rate" : "Show frame rate",
@@ -2110,7 +2112,6 @@ function OpenCommandPaletteDialog(props: {
   const gameItems = actionItems.splice(0);
   const stopIndex = gameItems.findIndex((item) => item.value === "action:game-stop");
   if (stopIndex >= 0) gameItems.push(...gameItems.splice(stopIndex, 1));
-  const developerItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
   actionItems.push({
     kind: "action",
     value: "action:game-create",

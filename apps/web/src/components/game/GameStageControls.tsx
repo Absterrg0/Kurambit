@@ -107,7 +107,7 @@ export function GameStageBar({
   runs: StageRuns;
   onRestart: () => void;
   onFullscreen: () => void;
-  /** The `⋯` menu's View section after Show controls: the dev views, each with its key. */
+  /** The `⋯` menu's View section after Show controls: Responsive view once it arrived. */
   viewItems: ReactNode;
   /** Responsive view's arrival: the menu says it once with a dot. */
   responsive: GameArrival;

@@ -19,7 +19,6 @@ import {
   PaletteIcon,
   DownloadIcon,
   FilmIcon,
-  StepForwardIcon,
   FolderOpenIcon,
   PanelRightIcon,
   PanelTopCloseIcon,
@@ -114,9 +113,6 @@ import {
   useBuildFrame,
   captureStageFrame,
   useThreadStageBridge,
-  setStageDevView,
-  stepStageFrame,
-  useStageDevViews,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
 import { buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.logic";
@@ -552,12 +548,6 @@ function ThreadGameStage({
   const threadKey = scopedThreadKey(threadRef);
   // Paused by the person, to point at things.
   const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
-  const devCapable = useThreadStageBridge(
-    threadKey,
-    (state) => state.status === "ready" && state.capabilities.includes("dev"),
-    false,
-  );
-  const devViews = useStageDevViews(threadKey);
   const keepGoing = useKeepGoing(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{
@@ -1314,13 +1304,6 @@ function ThreadGameStage({
   const inspectorKey = shortcutLabelForCommand(keybindings, "rightPanel.toggle", {
     context: { gameThread: true },
   });
-  const devKey = (
-    command: "game.stepFrame" | `game.${"freeCamera" | "bounds" | "frameRate"}.toggle`,
-  ) => shortcutLabelForCommand(keybindings, command, { context: { gameThread: true } });
-  const stepKey = devKey("game.stepFrame");
-  const freeCameraKey = devKey("game.freeCamera.toggle");
-  const boundsKey = devKey("game.bounds.toggle");
-  const frameRateKey = devKey("game.frameRate.toggle");
   const responsiveKey = shortcutLabelForCommand(keybindings, "game.responsive.toggle", {
     context: { gameThread: true },
   });
@@ -1862,63 +1845,17 @@ function ThreadGameStage({
             onFullscreen={toggleFullscreen}
             responsive={arrivals.responsive}
             viewItems={
-              stageKind === "live" ? (
-                <>
-                  {/* Arrives when the phone or widescreen check finds a problem; its key and the
-                      palette reach it before then. */}
-                  {arrivals.responsive.shown || deviceOn ? (
-                    <MenuCheckboxItem
-                      variant="switch"
-                      checked={deviceOn}
-                      onCheckedChange={() => toggleStageDevice(threadKey)}
-                    >
-                      Responsive view
-                      {responsiveKey === null ? null : <MenuShortcut>{responsiveKey}</MenuShortcut>}
-                    </MenuCheckboxItem>
-                  ) : null}
-                  {devCapable ? (
-                    <>
-                      <MenuCheckboxItem
-                        variant="switch"
-                        closeOnClick={false}
-                        checked={devViews.bounds}
-                        onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
-                      >
-                        Bounds
-                        {boundsKey === null ? null : <MenuShortcut>{boundsKey}</MenuShortcut>}
-                      </MenuCheckboxItem>
-                      <MenuCheckboxItem
-                        variant="switch"
-                        closeOnClick={false}
-                        checked={devViews.perf}
-                        onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
-                      >
-                        Frame rate
-                        {frameRateKey === null ? null : <MenuShortcut>{frameRateKey}</MenuShortcut>}
-                      </MenuCheckboxItem>
-                      <MenuCheckboxItem
-                        variant="switch"
-                        closeOnClick={false}
-                        checked={devViews.freeCamera}
-                        onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
-                      >
-                        Free camera while frozen
-                        {freeCameraKey === null ? null : (
-                          <MenuShortcut>{freeCameraKey}</MenuShortcut>
-                        )}
-                      </MenuCheckboxItem>
-                      <MenuItem
-                        disabled={!frozen}
-                        closeOnClick={false}
-                        onClick={() => stepStageFrame(threadKey)}
-                      >
-                        <StepForwardIcon />
-                        Step one frame
-                        {stepKey === null ? null : <MenuShortcut>{stepKey}</MenuShortcut>}
-                      </MenuItem>
-                    </>
-                  ) : null}
-                </>
+              // Arrives when the phone or widescreen check finds a problem; its key and the
+              // palette reach it before then. The dev views are the palette's Developer commands.
+              stageKind === "live" && (arrivals.responsive.shown || deviceOn) ? (
+                <MenuCheckboxItem
+                  variant="switch"
+                  checked={deviceOn}
+                  onCheckedChange={() => toggleStageDevice(threadKey)}
+                >
+                  Responsive view
+                  {responsiveKey === null ? null : <MenuShortcut>{responsiveKey}</MenuShortcut>}
+                </MenuCheckboxItem>
               ) : null
             }
             stageItems={

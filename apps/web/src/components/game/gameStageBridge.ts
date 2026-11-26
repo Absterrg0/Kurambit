@@ -487,15 +487,12 @@ const postDevViews = (threadKey: string) => {
   if (state.owner?.startsWith(`${threadKey}\0`) && state.capabilities.includes("dev"))
     state.post?.({ type: "studio-dev", ...(useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS) });
 };
-export const setStageDevView = (threadKey: string, view: keyof StageDevViews, on: boolean) => {
-  const now = useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS;
-  useDevViews.setState({ [threadKey]: { ...now, [view]: on } });
-  postDevViews(threadKey);
-};
 /** A dev view flipped, for the palette and its keys; false when the game on the Stage has none. */
 export const toggleStageDevView = (threadKey: string, view: keyof StageDevViews): boolean => {
   if (!stageCan(threadKey, "dev")) return false;
-  setStageDevView(threadKey, view, !(useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS)[view]);
+  const now = useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS;
+  useDevViews.setState({ [threadKey]: { ...now, [view]: !now[view] } });
+  postDevViews(threadKey);
   return true;
 };
 /** One fixed step of the frozen game; false when nothing is frozen to step. */

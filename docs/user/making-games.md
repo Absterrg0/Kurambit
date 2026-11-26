@@ -273,7 +273,7 @@ lose**, sound, **Fullscreen**, and a **⋯** menu. **Can't lose** is there only 
 can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". While a
 game has no sound files, the sound button is dimmed and reads **No sound yet**. Paused, or once a run ends, the run's timeline and
 its time fill the middle. The **⋯** menu has the run (tell the agent about it, save it as a test
-play), what you see (the game's controls and the dev views) and the Stage (pause when you click
+play), what you see (the game's controls) and the Stage (pause when you click
 away, hide the game, stop it). The controls list every action with its keys, and a click on one
 changes its key; a game with the built-in follow camera lists **Look around** there: hold the right
 mouse button, or a key you give it, and move the pointer. Hover a control for its key. Hidden, the game folds into the top bar
@@ -406,10 +406,10 @@ what fills it:
   about and you can save as a test play, and the timeline marks the second it went on from. After a
   fork with tuned values, **Replay as it was** in the bar's **⋯** menu plays the same three seconds
   of your input without the change.
-- **Dev views (three.js).** The bar's **⋯** menu, under what you see, steps a frozen game one frame at a
-  time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
-  of the game's named things, and show the frame rate in the game's corner. They and Can't lose
-  are in the command palette too, with keys that work while you play (Settings → Keybindings).
+- **Dev views (three.js).** The command palette's **Developer** commands step a frozen game one
+  frame at a time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw
+  the bounds of the game's named things, and show the frame rate in the game's corner. Each has a
+  key that works while you play (Settings → Keybindings).
 - **Responsive view (three.js).** **⋯ → Responsive view** (in the menu once a phone or widescreen
   check finds a problem), its key or the palette turns the Stage into
   a device view like a browser's: pick Phone, Tablet, Laptop, Desktop, Ultrawide or Responsive, type
