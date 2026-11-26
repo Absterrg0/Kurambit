@@ -25,6 +25,7 @@ import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
 import { useStageBridge, useStageBridgeFrame } from "./gameStageBridge";
+import { watchFrameFocus } from "./frameFocus";
 import type { GameStagePhase } from "./gameStageLogic";
 import type { GameStageDevice } from "./gameStageDevice";
 import { GameDeviceToolbar, useStageDeviceLayout } from "./GameStageDeviceView";
@@ -529,7 +530,6 @@ export function GameFrame({
     bridgeOwner !== null,
     hello,
   );
-  const [frameFocused, setFrameFocused] = useState(false);
   // Reached by Tab: the game shows the app's focus ring, which an iframe's own outline cannot.
   const [keyboardFocused, setKeyboardFocused] = useState(false);
   // The game has the keyboard only when the person gave it: a click on it (the pointer is over
@@ -605,32 +605,19 @@ export function GameFrame({
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
   const pendingAck = useRef(false);
-  // Whenever the game does not have the keyboard (the chat, the composer, Tune, a game nobody
-  // clicked into yet), it holds the way a hidden Stage does once it has drawn its first frame: a
+  // Whenever the game does not have the keyboard (the chat, the composer, Tune, blank app space,
+  // a game nobody clicked into yet), it holds the way a hidden Stage does once it has drawn its first frame: a
   // run is never lost to typing, and a game nobody plays draws nothing (a drawing game costs a
   // GPU's worth of work, or most of the processor without one). "Click to play" plays it on.
-  // Read from the window's blur and the active element: a click into the frame sends the frame
-  // element no focus event.
   const [inGame, setInGame] = useState(false);
-  useEffect(() => {
-    let settle = 0;
-    const read = () =>
-      setInGame(frameRef.current !== null && document.activeElement === frameRef.current);
-    const onBlur = () => {
-      window.clearTimeout(settle);
-      settle = window.setTimeout(read);
-    };
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", read);
-    document.addEventListener("focusin", read);
-    return () => {
-      window.clearTimeout(settle);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", read);
-      document.removeEventListener("focusin", read);
-    };
-  }, []);
-  const away = pauseWhenAway && shown && started && !inGame && !frameFocused && !hidden;
+  useEffect(
+    () =>
+      watchFrameFocus(() =>
+        setInGame(frameRef.current !== null && document.activeElement === frameRef.current),
+      ),
+    [],
+  );
+  const away = pauseWhenAway && shown && started && !inGame && !hidden;
   // The person's own freeze is for pointing at things: its layer takes the click, not this one.
   const frozen = useStageBridge(
     (state) => bridgeOwner !== null && state.owner === bridgeOwner && state.frozen,
@@ -738,7 +725,6 @@ export function GameFrame({
         }}
         onLoad={() => {
           setLoaded(true);
-          setFrameFocused(false);
           // The game's listener may have come up after the last message;
           // a fresh document needs the current state restated.
           frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
@@ -748,11 +734,8 @@ export function GameFrame({
           if (from instanceof HTMLElement && from.isConnected && from.closest(MODAL_SURFACES)) {
             // Handed straight back, so Escape and the arrows keep working in the open menu.
             from.focus({ preventScroll: true });
-            return;
           }
-          setFrameFocused(true);
         }}
-        onBlur={() => setFrameFocused(false)}
       />
       {started ? null : <StartingCard name={gameName} loaded={loaded} onReload={reload} />}
       {keyboardFocused ? (

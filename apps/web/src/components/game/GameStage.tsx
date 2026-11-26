@@ -7,6 +7,7 @@ import { deriveProjectIdentity } from "../../projectIdentity";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
+import { watchFrameFocus } from "./frameFocus";
 import { useArrivalDot } from "../../gameArrivalStore";
 import { useGameArrivals } from "./useGameArrivals";
 import { GameStageBar } from "./GameStageControls";
@@ -340,28 +341,16 @@ function usePlayerInGame(stageRef: { readonly current: HTMLElement | null }): bo
   const [playerIn, setPlayerIn] = useState(false);
   useEffect(() => {
     let grace = 0;
-    let settle = 0;
-    const read = () => {
+    const stop = watchFrameFocus(() => {
       const active = document.activeElement;
       window.clearTimeout(grace);
       if (isFolderGameFrame(active) && stageRef.current?.contains(active) === true)
         setPlayerIn(true);
       else grace = window.setTimeout(() => setPlayerIn(false), PLAYER_GRACE_MS);
-    };
-    // The frame is the focused element only once the blur has settled.
-    const onBlur = () => {
-      window.clearTimeout(settle);
-      settle = window.setTimeout(read);
-    };
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", read);
-    document.addEventListener("focusin", read);
+    });
     return () => {
       window.clearTimeout(grace);
-      window.clearTimeout(settle);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", read);
-      document.removeEventListener("focusin", read);
+      stop();
     };
   }, [stageRef]);
   return playerIn;
