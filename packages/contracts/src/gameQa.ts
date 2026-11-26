@@ -55,6 +55,12 @@ export const GameQaHud = Schema.Struct({
   height: Count,
   off: Schema.Array(Text(60)).check(Schema.isMaxLength(8)),
   over: Schema.Array(Schema.Tuple([Text(60), Text(60)])).check(Schema.isMaxLength(8)),
+  /**
+   * Text off the view or overlapping in only one of two reads a second apart: it moves or
+   * pops in, so a single read catching it is timing, never a failure by itself. Absent from older
+   * shells, which read once.
+   */
+  moving: Schema.optionalKey(Schema.Array(Text(60)).check(Schema.isMaxLength(8))),
 });
 export type GameQaHud = typeof GameQaHud.Type;
 
@@ -98,6 +104,16 @@ const LOOPS_MORE = 0.8;
 
 export const listedNames = (names: ReadonlyArray<string>) =>
   names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/** PURE. HUD text a check saw in only one of its two reads, as a note that fails nothing. */
+const movingWords = (texts: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const unique = [...new Set(texts)];
+  return unique.length === 0
+    ? []
+    : [
+        `${listedNames(unique.slice(0, 3).map((text) => `"${text}"`))} off or overlapping in 1 of 2 reads a second apart (moves or pops in)`,
+      ];
+};
 
 /**
  * PURE. A QA report as findings. `errors`, `retry` and `hud` are certain (the check fails on
@@ -171,6 +187,8 @@ export const gameQaFindings = (report: GameQaReport) => {
     retry,
     hud,
     errors: report.errors ?? [],
+    /** HUD text seen off or overlapping in one read of two: a note, not a failure. */
+    moving: movingWords(report.hud.flatMap((size) => size.moving ?? [])),
     /** Retry was measured: the run ended and started again. */
     retried: after !== null,
   };
@@ -216,6 +234,8 @@ export const GameScreenSize = Schema.Struct({
    * HUD text in its DOM (a HUD drawn inside the canvas) or its shell could not say.
    */
   hudOff: Schema.NullOr(Schema.Array(Text(60)).check(Schema.isMaxLength(8))),
+  /** HUD text off the window in only one of two reads (GameQaHud's `moving`). */
+  hudMoving: Schema.optionalKey(Schema.Array(Text(60)).check(Schema.isMaxLength(8))),
   /** Game-relative PNG of the game at this size; null when none was kept. */
   frame: Schema.NullOr(Schema.String),
 });
@@ -300,7 +320,10 @@ export const gameScreensWords = (
   report: GameScreens,
 ): { readonly text: string; readonly broken: number } => {
   const found = gameScreensFindings(report);
-  const loads = report.bytes === null ? [] : [loadedWords(report.bytes)];
+  const loads = [
+    ...movingWords(report.sizes.flatMap((size) => size.hudMoving ?? [])),
+    ...(report.bytes === null ? [] : [loadedWords(report.bytes)]),
+  ];
   const first = found[0];
   if (first !== undefined)
     return {

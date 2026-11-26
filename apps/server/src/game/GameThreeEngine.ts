@@ -223,6 +223,7 @@ const decodeScreenRead = Schema.decodeUnknownOption(
       Schema.Struct({
         texts: Schema.optionalKey(Schema.Finite),
         off: Schema.Array(Schema.String),
+        moving: Schema.optionalKey(Schema.Array(Schema.String)),
       }),
     ),
   }),
@@ -299,6 +300,9 @@ const playScreen = async (
           : { width: Math.round(read.canvas.width), height: Math.round(read.canvas.height) },
       errors,
       hudOff: hud === null || hud.texts === 0 ? null : hud.off.slice(0, 8),
+      ...(hud?.moving === undefined || hud.moving.length === 0
+        ? {}
+        : { hudMoving: hud.moving.slice(0, 8).map((text) => text.slice(0, 60)) }),
       frame: kept ? NodePath.relative(input.root, frame) : null,
     },
     bytes: session.loadedBytes(),

@@ -311,7 +311,7 @@ export function installStudio({
       : {
           qa: {
             run: () => qa.run(),
-            hud: () => qa.hud(),
+            hud: (before) => qa.hud(before),
           },
         }),
     // A play the Stage kept, run again on this build from its seed and its input at each

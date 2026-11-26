@@ -254,20 +254,20 @@ const DRAW_SHEET = `((name, views) => {
     return { error: String(error).slice(0, 300) };
   }
 })`;
-const READ_HUD = `(() => {
+const READ_HUD = `((before) => {
   const qa = window.__studio?.qa;
   if (qa === null || typeof qa !== "object" || typeof qa.hud !== "function") return null;
   try {
-    return JSON.parse(JSON.stringify(qa.hud()));
+    return JSON.parse(JSON.stringify(qa.hud(before)));
   } catch {
     return null;
   }
-})()`;
+})`;
 /**
  * The window as a player sees it at this size: the part of it the largest canvas covers, and the
  * shell's HUD reading (shell/qa.js) where it has one.
  */
-const READ_SCREEN = `(() => {
+const READ_SCREEN = `((before) => {
   const width = window.innerWidth;
   const height = window.innerHeight;
   const boxes = [...document.querySelectorAll("canvas")]
@@ -283,10 +283,15 @@ const READ_SCREEN = `(() => {
   try {
     const qa = window.__studio?.qa;
     if (qa !== null && typeof qa === "object" && typeof qa.hud === "function")
-      hud = JSON.parse(JSON.stringify(qa.hud()));
+      hud = JSON.parse(JSON.stringify(qa.hud(before?.hud ?? null)));
   } catch {}
   return { width, height, canvas, hud };
-})()`;
+})`;
+/**
+ * Between a HUD's two reads (shell/qa.js hud): text off or overlapping in only one of them moves
+ * or pops in, so which single read catches it is timing; in both, it stays there a second or more.
+ */
+const HUD_AGAIN_MS = 1000;
 const FRAME_COUNTER = `(() => {
   let frames = 0;
   let seconds = 0;
@@ -996,6 +1001,18 @@ export const openWebPlaySession = async (input: {
         frameMs === null ? MAX_SCALE : Math.min(MAX_SCALE, Math.max(1, frameMs / SCALE_FRAME_MS));
     });
     const callMs = () => Math.round(PLAY_BOUNDS.webCallMs * scale);
+    /** A reading (READ_HUD, READ_SCREEN) taken twice, the second against the first; null: none. */
+    const readTwice = async (reading: string): Promise<unknown> => {
+      const read = (before: unknown) =>
+        bounded(
+          page.evaluate(`${reading}(${JSON.stringify(before)})`).catch(() => null),
+          PLAY_BOUNDS.webCallMs,
+        ).then((answer) => (answer === TIMED_OUT ? null : answer));
+      const first = await read(null);
+      if (first === null) return null;
+      await new Promise((resolve) => setTimeout(resolve, HUD_AGAIN_MS));
+      return (await read(first)) ?? first;
+    };
     const software = () =>
       input.browser.software
         ? ` This browser draws in software${frameMs === null ? "" : `: one frame takes about ${frameMs} ms`}.`
@@ -1274,13 +1291,7 @@ export const openWebPlaySession = async (input: {
       keptStorage: () => kept,
       perf: () => perf,
       loadedBytes: () => loaded,
-      screen: async () => {
-        const read = await bounded(
-          page.evaluate(READ_SCREEN).catch(() => null),
-          PLAY_BOUNDS.webCallMs,
-        );
-        return read === TIMED_OUT ? null : read;
-      },
+      screen: () => readTwice(READ_SCREEN),
       scene: () => scene,
       replay: async (play, options) => {
         const answered = await bounded(
@@ -1363,23 +1374,17 @@ export const openWebPlaySession = async (input: {
         );
         if (played === TIMED_OUT || played === null) return null;
         if (played === "no-qa") return played;
-        const wide = await bounded(
-          page.evaluate(READ_HUD).catch(() => null),
-          PLAY_BOUNDS.webCallMs,
-        );
+        const wide = await readTwice(READ_HUD);
         await page.setViewportSize({
           width: Math.round((input.height * 4) / 3),
           height: input.height,
         });
         await new Promise((resolve) => setTimeout(resolve, 400));
-        const narrow = await bounded(
-          page.evaluate(READ_HUD).catch(() => null),
-          PLAY_BOUNDS.webCallMs,
-        );
+        const narrow = await readTwice(READ_HUD);
         await page.setViewportSize({ width: input.width, height: input.height });
         return {
           ...(played as object),
-          hud: [wide, narrow].filter((each) => each !== TIMED_OUT && each !== null),
+          hud: [wide, narrow].filter((each) => each !== null),
         };
       },
       act,

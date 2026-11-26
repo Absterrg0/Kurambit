@@ -309,8 +309,11 @@ export function createQa({
     /**
      * The HUD's text off the view or over other HUD text, at the page's size now. `texts` is how
      * many HUD texts it read: none means a HUD drawn in the canvas, which this cannot see.
+     * `before`: this page's read a moment ago. Text off or overlapping in both is the layout's; in
+     * one only (`moving`), it moves or pops in, as a countdown digit scaling in does, and which
+     * read catches it is timing.
      */
-    hud() {
+    hud(before) {
       const items = [];
       for (const element of document.body.querySelectorAll("*")) {
         const own = [...element.childNodes]
@@ -346,7 +349,31 @@ export function createQa({
           const smaller = Math.min(a.rect.width * a.rect.height, b.rect.width * b.rect.height);
           if (w * h > smaller * 0.3) over.push([a.text, b.text]);
         }
-      return { width, height, texts: items.length, off: off.slice(0, 8), over: over.slice(0, 8) };
+      const now = {
+        width,
+        height,
+        texts: items.length,
+        off: off.slice(0, 8),
+        over: over.slice(0, 8),
+      };
+      if (before == null) return now;
+      const pair = ([a, b]) => `${a}\0${b}`;
+      const wasOff = new Set(before.off);
+      const wasOver = new Set(before.over.map(pair));
+      const isOff = new Set(now.off);
+      const isOver = new Set(now.over.map(pair));
+      const moving = new Set([
+        ...now.off.filter((text) => !wasOff.has(text)),
+        ...before.off.filter((text) => !isOff.has(text)),
+        ...now.over.filter((each) => !wasOver.has(pair(each))).flat(),
+        ...before.over.filter((each) => !isOver.has(pair(each))).flat(),
+      ]);
+      return {
+        ...now,
+        off: now.off.filter((text) => wasOff.has(text)),
+        over: now.over.filter((each) => wasOver.has(pair(each))),
+        moving: [...moving].slice(0, 8),
+      };
     },
   };
 }

@@ -726,13 +726,19 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
         return measured(
           first === undefined
             ? {
-                text: `HUD stays on screen at ${report.hud.map((size) => `${size.width}×${size.height}`).join(" and ")}`,
+                text: [
+                  `HUD stays on screen at ${report.hud.map((size) => `${size.width}×${size.height}`).join(" and ")}`,
+                  ...found.moving,
+                ].join(" · "),
                 value: 0,
                 tone: "good",
                 kind: "clean",
               }
             : {
-                text: `${first.said}${found.hud.length > 1 ? ` (+${found.hud.length - 1} more)` : ""}`,
+                text: [
+                  `${first.said}${found.hud.length > 1 ? ` (+${found.hud.length - 1} more)` : ""}`,
+                  ...found.moving,
+                ].join(" · "),
                 value: found.hud.length,
                 tone: "bad",
                 kind: "off",
