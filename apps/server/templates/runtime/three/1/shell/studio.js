@@ -159,10 +159,10 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 // What a game registers outside its run, for the QA play's Retry check (shell/qa.js): the
-// listeners on window and document, the intervals running and the animation frames asked
-// for. Counted only when the harness set window.__studioQa before any script ran; a page a
-// player opens never wraps these. Installed here, before the game module runs.
-export const outsideRun = { listeners: () => 0, intervals: () => 0, frames: 0 };
+// listeners on window and document, the intervals running, and the animation frames asked for
+// against the frames drawn. Counted only when the harness set window.__studioQa before any script
+// ran; a page a player opens never wraps these. Installed here, before the game module runs.
+export const outsideRun = { listeners: () => 0, intervals: () => 0, frames: 0, drawn: 0 };
 if (window.__studioQa === true) {
   const registry = new Map([
     [window, new Map()],
@@ -202,9 +202,18 @@ if (window.__studioQa === true) {
   };
   outsideRun.intervals = () => running.size;
   const requestFrame = window.requestAnimationFrame.bind(window);
+  // Every callback of one drawn frame gets the same timestamp, so asks per drawn frame is the
+  // number of loops running, whatever the frame rate: a lighter scene draws faster, not twice.
+  let drawnAt = -1;
   window.requestAnimationFrame = (callback) => {
     outsideRun.frames += 1;
-    return requestFrame(callback);
+    return requestFrame((now) => {
+      if (now !== drawnAt) {
+        drawnAt = now;
+        outsideRun.drawn += 1;
+      }
+      callback(now);
+    });
   };
 }
 

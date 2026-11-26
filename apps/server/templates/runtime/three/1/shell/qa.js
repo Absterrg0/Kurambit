@@ -9,8 +9,8 @@
 //     action read on none of them is reported as not read there, which is what was seen.
 //   - Retry starts clean: a run is ended and retried as GameState.play() retries it, and the
 //     new run is counted against the one before it: the scene's objects, the listeners on
-//     window and document, the intervals running, the animation frames asked for each
-//     second, and errors. Growth is state the game kept outside its run.
+//     window and document, the intervals running, the animation loops asking for frames, and
+//     errors. Growth is state the game kept outside its run.
 //   - the HUD fits: the page's text stays inside the view and does not overlap.
 //
 // A page a player opens never runs this: the harness calls window.__studio.qa on a page it
@@ -234,14 +234,16 @@ export function createQa({
     run.ctx.scene.traverse(() => (objects += 1));
     let things = 0;
     eachThing(() => (things += 1));
-    const framesFrom = outsideRun.frames;
+    const askedFrom = outsideRun.frames;
+    const drawnFrom = outsideRun.drawn;
     await wait(1000);
+    const drawn = outsideRun.drawn - drawnFrom;
     return {
       objects,
       things,
       listeners: outsideRun.listeners(),
       intervals: outsideRun.intervals(),
-      framesPerSecond: outsideRun.frames - framesFrom,
+      loops: drawn === 0 ? 0 : Math.round(((outsideRun.frames - askedFrom) / drawn) * 10) / 10,
     };
   };
 
