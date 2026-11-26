@@ -246,7 +246,6 @@ export const layerFor = (root: string, records = memoryBuildRecords()) =>
             >),
         }),
         Layer.mock(GameFacts.GameFacts)({
-          harness: "test",
           readMany: () => Effect.succeed(new Map()),
           // Queued like a turn build's measure; nothing plays here.
           measure: () => Effect.succeed({} as GameBuildFactsShape),

@@ -129,7 +129,6 @@ const world = Effect.gen(function* () {
           captureCheckpoint: () => Effect.succeed(oid(9)),
         }),
         Layer.mock(GameFacts.GameFacts)({
-          harness: "test",
           readMany: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameRunControl.GameRunControl)({

@@ -296,8 +296,6 @@ interface Job {
 export class GameFacts extends Context.Service<
   GameFacts,
   {
-    /** The harness id facts are measured under now. */
-    readonly harness: string;
     /** The build's facts as stored, with what a measurement in flight will add; starts nothing. */
     readonly read: (build: ResolvedBuild) => Effect.Effect<GameBuildFacts>;
     /** The facts of many builds at once, for the list. */
@@ -347,22 +345,29 @@ const make = Effect.gen(function* () {
   const operations = yield* GameOperations.GameOperations;
   const gameBrowser = yield* makeGameBrowser;
   const scope = yield* Effect.scope;
-  // Missing templates fail a measure (its bots cannot be copied), never the server's start.
-  const templates = yield* (yield* GameTemplates.GameTemplates).directory.pipe(
-    Effect.tapError((error) =>
-      Effect.logWarning("game facts: the starter templates are unavailable", error),
-    ),
-    Effect.orElseSucceed(() => NodePath.join(import.meta.dirname, "missing-templates")),
+  const gameTemplates = yield* GameTemplates.GameTemplates;
+  // Read on first use: on a fresh home it extracts the templates, which held every route's start.
+  const kit = yield* Effect.cached(
+    Effect.gen(function* () {
+      // Missing templates fail a measure (its bots cannot be copied), never the server's start.
+      const templates = yield* gameTemplates.directory.pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("game facts: the starter templates are unavailable", error),
+        ),
+        Effect.orElseSucceed(() => NodePath.join(import.meta.dirname, "missing-templates")),
+      );
+      const masher = NodePath.join(templates, "bot-kit", MASHER);
+      // Facts are comparable only when the same bots and bounds measured them.
+      const harness = yield* Effect.promise(async () => {
+        const hash = NodeCrypto.createHash("sha256");
+        const { masherSeconds, startSeconds } = GAME_FACTS_BOUNDS;
+        hash.update(`${FACTS_VERSION}\0${masherSeconds},${startSeconds}\0`);
+        hash.update(await NodeFSP.readFile(masher).catch(() => Buffer.from(MASHER)));
+        return hash.digest("hex").slice(0, 12);
+      });
+      return { templates, masher, harness };
+    }),
   );
-  const masher = NodePath.join(templates, "bot-kit", MASHER);
-  // Facts are comparable only when the same bots and bounds measured them.
-  const harness = yield* Effect.promise(async () => {
-    const hash = NodeCrypto.createHash("sha256");
-    const { masherSeconds, startSeconds } = GAME_FACTS_BOUNDS;
-    hash.update(`${FACTS_VERSION}\0${masherSeconds},${startSeconds}\0`);
-    hash.update(await NodeFSP.readFile(masher).catch(() => Buffer.from(MASHER)));
-    return hash.digest("hex").slice(0, 12);
-  });
   /** A job per facts key, registered before anything yields, removed when it ends. */
   const jobs = new Map<string, Job>();
   const personWaiting = () => [...jobs.values()].filter((job) => job.person && !job.running).length;
@@ -381,6 +386,7 @@ const make = Effect.gen(function* () {
     );
   const save = (key: string, stored: Stored) =>
     Effect.gen(function* () {
+      const { harness } = yield* kit;
       const now = DateTime.formatIso(yield* DateTime.now);
       yield* sql`
         INSERT INTO game_build_facts (facts_key, harness, payload_json, updated_at)
@@ -397,7 +403,7 @@ const make = Effect.gen(function* () {
     );
 
   const NEVER = notMeasured("not measured yet", true);
-  const view = (build: ResolvedBuild, found: Found | null): GameBuildFacts => {
+  const view = (build: ResolvedBuild, found: Found | null, harness: string): GameBuildFacts => {
     const job = jobs.get(build.key);
     const current = found !== null && found.harness === harness ? found.stored : null;
     const stored = found?.stored;
@@ -517,10 +523,14 @@ const make = Effect.gen(function* () {
     });
 
   const read: GameFacts["Service"]["read"] = (build) =>
-    Effect.flatMap(load(build.key), (found) => withEvidence(build.root, view(build, found)));
+    Effect.gen(function* () {
+      const { harness } = yield* kit;
+      return yield* withEvidence(build.root, view(build, yield* load(build.key), harness));
+    });
 
   const readMany: GameFacts["Service"]["readMany"] = (builds) =>
     Effect.gen(function* () {
+      const { harness } = yield* kit;
       const keys = [...new Set(builds.map((build) => build.key))];
       const rows =
         keys.length === 0
@@ -540,7 +550,7 @@ const make = Effect.gen(function* () {
         }),
       );
       return new Map(
-        builds.map((build) => [build.build, view(build, found.get(build.key) ?? null)]),
+        builds.map((build) => [build.build, view(build, found.get(build.key) ?? null, harness)]),
       );
     });
 
@@ -557,6 +567,7 @@ const make = Effect.gen(function* () {
   // tier never measured or not measured for a reason waiting clears (and,
   // for a person, a standing fault they may have fixed).
   const planOf = (
+    harness: string,
     found: Found | null,
     person: boolean,
     runtime: string | null,
@@ -623,12 +634,14 @@ const make = Effect.gen(function* () {
 
   /** The runtime the copy's plays load now, for a game that loads one (gameRuntime.ts). */
   const runtimeOf = (copy: string, engine: GameEngineId) =>
-    Effect.promise(async () => {
-      const major = await NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
-        .then((text) => manifestRuntime(decodeCopyManifest(text)))
-        .catch(() => null);
-      return major === null ? null : runtimeVersion(runtimesDirectory(templates), engine, major);
-    });
+    Effect.flatMap(kit, ({ templates }) =>
+      Effect.promise(async () => {
+        const major = await NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
+          .then((text) => manifestRuntime(decodeCopyManifest(text)))
+          .catch(() => null);
+        return major === null ? null : runtimeVersion(runtimesDirectory(templates), engine, major);
+      }),
+    );
 
   /**
    * The screen sizes' frames, kept in the game's logs beside the build's other evidence: a
@@ -675,6 +688,7 @@ const make = Effect.gen(function* () {
     Effect.scoped(
       Effect.gen(function* () {
         const { root, key } = build;
+        const { harness, masher } = yield* kit;
         const announce = (message: string) => operations.changed(root, GAME_FACTS_EVENT, message);
         const copy = yield* copies.lease(root, { oid: build.build, key });
         // Every engine step is the copy's only one: Play and a measurement never import at once.
@@ -975,6 +989,7 @@ const make = Effect.gen(function* () {
   const runJob = (job: Job) =>
     Effect.gen(function* () {
       const { build } = job;
+      const { harness } = yield* kit;
       const before = yield* load(build.key);
       if (before === null || before.harness !== harness)
         yield* save(build.key, {
@@ -991,6 +1006,7 @@ const make = Effect.gen(function* () {
           job.running = true;
           const found = yield* load(build.key);
           const tiers = planOf(
+            harness,
             found,
             job.person,
             yield* runtimeOf(build.root, build.engine),
@@ -1054,6 +1070,7 @@ const make = Effect.gen(function* () {
   const drop = (job: Job) =>
     Effect.gen(function* () {
       if (job.fiber !== null) yield* Fiber.interrupt(job.fiber);
+      const { harness } = yield* kit;
       if (jobs.has(job.build.key)) return;
       yield* sql`
         DELETE FROM game_build_facts
@@ -1086,9 +1103,11 @@ const make = Effect.gen(function* () {
       // caught it queued would never hear that it ended unless its build's facts moved.
       if (!jobs.has(build.key)) {
         const found = yield* load(build.key);
+        const { harness } = yield* kit;
         const owes =
           found === null ||
           planOf(
+            harness,
             found,
             person,
             yield* runtimeOf(build.root, build.engine),
@@ -1182,13 +1201,16 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  const owed: GameFacts["Service"]["owed"] = sql<{
-    readonly facts_key: string;
-    readonly harness: string;
-    readonly payload_json: string;
-  }>`
-    SELECT facts_key, harness, payload_json FROM game_build_facts WHERE harness = ${harness}
-  `.pipe(
+  const owed: GameFacts["Service"]["owed"] = Effect.flatMap(
+    kit,
+    ({ harness }) => sql<{
+      readonly facts_key: string;
+      readonly harness: string;
+      readonly payload_json: string;
+    }>`
+      SELECT facts_key, harness, payload_json FROM game_build_facts WHERE harness = ${harness}
+    `,
+  ).pipe(
     Effect.orElseSucceed(() => []),
     Effect.map((rows) =>
       rows.flatMap((row): ReadonlyArray<ResolvedBuild> => {
@@ -1209,7 +1231,7 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  return GameFacts.of({ harness, read, readMany, measure, owed });
+  return GameFacts.of({ read, readMany, measure, owed });
 });
 
 export const layer = Layer.effect(GameFacts, make);

@@ -353,11 +353,18 @@ const make = Effect.gen(function* () {
         .catch(() => undefined);
     },
   });
-  const fontDirectory = yield* labelFontDirectory(yield* GameTemplates.GameTemplates);
-  if (fontDirectory === undefined)
-    yield* Effect.logWarning(
-      "asset library: the label font is missing; contact sheets go unnumbered",
-    );
+  // Read on first use: on a fresh home it extracts the templates, which held every route's start.
+  const labelFont = yield* Effect.cached(
+    labelFontDirectory(yield* GameTemplates.GameTemplates).pipe(
+      Effect.tap((directory) =>
+        directory === undefined
+          ? Effect.logWarning(
+              "asset library: the label font is missing; contact sheets go unnumbered",
+            )
+          : Effect.void,
+      ),
+    ),
+  );
 
   // A fetch cut short by a crash or a stopped server leaves its scratch behind, and nothing reads it again.
   yield* Effect.promise(async () => {
@@ -800,6 +807,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const drawn = tiles.filter((tile) => tile.image !== undefined || tile.font !== undefined);
       if (drawn.length === 0) return undefined;
+      const fontDirectory = yield* labelFont;
       const ffmpeg = yield* Effect.promise(() =>
         GameProcesses.findExecutable("ffmpeg", {
           pathEnv: process.env.PATH,
