@@ -368,9 +368,28 @@ export function installStudio({
   // when the next frame is on the canvas. A Stage that let a page start behind another shows it
   // on the second: its first frame was drawn held, before the run had moved.
   let shown = null;
+  // A held page draws no WebGL, but its own HTML can still animate (a blinking "Press Space"),
+  // and with no GPU that alone keeps several cores busy. The hold pauses the page's animations
+  // (CSS animations and transitions included) that were running, and plays those on with it; one
+  // the game paused or ended meanwhile stays as it is.
+  let pausedAnimations = [];
+  const holdAnimations = (on) => {
+    if (!on) {
+      for (const animation of pausedAnimations)
+        if (animation.playState === "paused") animation.play();
+      pausedAnimations = [];
+      return;
+    }
+    for (const animation of document.getAnimations?.() ?? [])
+      if (animation.playState === "running") {
+        animation.pause();
+        pausedAnimations.push(animation);
+      }
+  };
   window.addEventListener("message", (event) => {
     if (event.data?.type !== "studio-visibility") return;
     const hidden = event.data.visible === false;
+    holdAnimations(hidden);
     const muted = hold(hidden);
     const ack = { type: "studio-visibility-ack", visible: !hidden, paused: hidden, muted };
     event.source?.postMessage?.(ack, "*");
