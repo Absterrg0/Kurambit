@@ -40,8 +40,9 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
 6. The facts' Performance row is the random-input play ("41 fps · 1% low 22 ·
    GPU 14 ms at 0.8× of 1280×720 · 1,900 draw calls · 2.1M triangles"): cut draw
    calls past a few hundred (one InstancedMesh per repeated model, merge static
-   pieces) and triangles past about 1.5M. A frame rate "not measured" in software
-   is Kurambit's machine, not your game; the counts are still your game's.
+   pieces) and triangles past about 1.5M. A frame rate "not measured" means this
+   computer draws in software, and so does the person's Stage on it
+   (`ctx.look.software`): a draw call costs about 1 ms there, CSS blur seconds.
 7. When you play with `game_play` ops `act` and `close`, send real keys (`"Enter"`, `"w"`, `"ArrowLeft"`), and a click
    before the game can capture the pointer; the page opens as a player opens
    it, on your title when the game has one.

@@ -2,6 +2,7 @@
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as NodeOS from "node:os";
 import { GameOperationError } from "@kurambit/contracts";
@@ -158,6 +159,13 @@ const PROBE_TIMEOUT = "15 seconds" as const;
  * as no hardware. Shared by every service that makes a game browser.
  */
 const backends = new Map<string, Promise<RenderBackend & { readonly probe: string }>>();
+/**
+ * Whether this machine's game browsers draw in software, once a probe in this process settled;
+ * null before. The turn rules read it to tell the agent once (gameTurnRules.ts): with no GPU for
+ * the headless browser there is none for the person's Stage on the same machine either.
+ */
+let drawsInSoftware: boolean | null = null;
+export const gameBrowsersDrawInSoftware = () => drawsInSoftware;
 const probeBackend = (executable: string, sandbox: boolean) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -236,7 +244,40 @@ export const makeGameBrowser = Effect.gen(function* () {
         : ""
     }`;
   };
-  return (operation: string, path: string): Effect.Effect<GameBrowser, GameOperationError> =>
+  const backendFor = (executable: string) => {
+    let backend = backends.get(executable);
+    if (backend === undefined) {
+      backend = Effect.runPromiseWith(services)(
+        probeBackend(executable, sandbox).pipe(
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.catchCause((cause) =>
+            Effect.logInfo("Game browsers render in software: the GPU probe failed.", {
+              cause,
+            }).pipe(
+              Effect.as({
+                ...chooseBackend(platform, []),
+                probe: `the probe itself failed (${String(Cause.squash(cause)).slice(0, 120)})`,
+              }),
+            ),
+          ),
+          // In software no frame time is read, so plays share the cores: each SwiftShader
+          // page draws on several threads, so a quarter of them per play. On a GPU, one.
+          Effect.tap((chosen) =>
+            playLane.setWidth(chosen.software ? NodeOS.availableParallelism() / 4 : 1),
+          ),
+        ),
+      ).then((chosen) => {
+        drawsInSoftware = chosen.software;
+        return chosen;
+      });
+      backends.set(executable, backend);
+    }
+    return backend;
+  };
+  const browserFor = (
+    operation: string,
+    path: string,
+  ): Effect.Effect<GameBrowser, GameOperationError> =>
     preview.executable.pipe(
       Effect.mapError(
         (error) =>
@@ -249,30 +290,7 @@ export const makeGameBrowser = Effect.gen(function* () {
           }),
       ),
       Effect.flatMap((executable) => {
-        let backend = backends.get(executable);
-        if (backend === undefined) {
-          backend = Effect.runPromiseWith(services)(
-            probeBackend(executable, sandbox).pipe(
-              Effect.provideService(HostProcess.Platform, platform),
-              Effect.catchCause((cause) =>
-                Effect.logInfo("Game browsers render in software: the GPU probe failed.", {
-                  cause,
-                }).pipe(
-                  Effect.as({
-                    ...chooseBackend(platform, []),
-                    probe: `the probe itself failed (${String(Cause.squash(cause)).slice(0, 120)})`,
-                  }),
-                ),
-              ),
-              // In software no frame time is read, so plays share the cores: each SwiftShader
-              // page draws on several threads, so a quarter of them per play. On a GPU, one.
-              Effect.tap((chosen) =>
-                playLane.setWidth(chosen.software ? NodeOS.availableParallelism() / 4 : 1),
-              ),
-            ),
-          );
-          backends.set(executable, backend);
-        }
+        const backend = backendFor(executable);
         return Effect.map(
           Effect.promise(() => backend),
           (chosen) => ({
@@ -287,6 +305,19 @@ export const makeGameBrowser = Effect.gen(function* () {
         );
       }),
     );
+  return Object.assign(browserFor, {
+    /**
+     * Probes an installed browser's backend now, so the first turn's rules can say whether this
+     * machine draws in software; installs nothing.
+     */
+    probeInstalled: preview.installed.pipe(
+      Effect.flatMap((installed) =>
+        Option.isSome(installed)
+          ? Effect.promise(() => backendFor(installed.value)).pipe(Effect.asVoid)
+          : Effect.void,
+      ),
+    ),
+  });
 });
 
 /**

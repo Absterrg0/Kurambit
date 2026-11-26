@@ -33,6 +33,7 @@
   ],
   "playtest": "- Play it yourself (`game_play` op `act` opens a session, `close` ends it) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. An act's `decide` script plays a whole run with the player's controls: add no autopilot or debug global to the game.",
   "undo": "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.",
+  "software": "- **This computer has no GPU.** Its browser draws in software, and so does the person's Stage, at the speed your checks and plays show: what is slow there is slow for them. A draw call costs about a millisecond and CSS blur or backdrop-filter costs seconds; read `ctx.look.software` (TEMPLATE.md) for a cheaper path instead of your own quality tiers, and keep the boot under 20 s.",
   "keepGoing": [
     "## Keep going",
     "",

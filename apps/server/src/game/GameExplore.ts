@@ -141,6 +141,8 @@ const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
   const projects = yield* GameProjectService.GameProjectService;
   const gameBrowser = yield* makeGameBrowser;
+  // Whether this machine draws in software goes into the turn rules; probed in the background.
+  yield* gameBrowser.probeInstalled.pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
   const engines = yield* GameEngine.GameEngine;
   const gate = yield* GameMemoryGate.GameMemoryGate;
   const stateDir = (yield* ServerConfig.ServerConfig).stateDir;

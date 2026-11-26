@@ -35,7 +35,8 @@ exists the page runs nothing. This is all the bridge needs from it:
 Optional: `export const ASSETS = { name: "assets/…/file.glb" }` loads models and textures before
 the first run (`ctx.assets.model(name)`), and `export function render(ctx, dt)` draws the frame
 yourself. `index.html?play` boots straight into play while building. Every file loads from
-`web/`, nothing from the network; ES modules, no build step.
+`web/`, nothing from the network; ES modules, no build step. `ctx.look.software` is true where the
+browser draws without a GPU; `ctx.look.settings.quality` is `"low"` there unless `LOOK` names one.
 
 When the person asks you to remember something about the game, add it to `.studio/decisions.md`
 as one line, `- YYYY-MM-DD · what to remember`: every agent session on the game reads it.

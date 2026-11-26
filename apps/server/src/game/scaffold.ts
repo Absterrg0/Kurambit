@@ -81,13 +81,18 @@ const FIRST = STUDIO_TEXT.firstTurn;
  * it on every save (GamePreview.live), `export` plays a Web export the turn loop rebuilds when
  * the turn ends. The other engines' agents keep checking their own work.
  */
-const everyTurnSection = (engine: GameEngineId): string | undefined => {
+const everyTurnSection = (engine: GameEngineId, software: boolean): string | undefined => {
   const profile = engineProfile(engine);
   if (!profile.turnLoop) return undefined;
   const section = (TURN.everyTurn as Partial<Record<GameStageKind, string>>)[profile.stage];
   return section === undefined
     ? undefined
-    : fill(section, { scope: TURN.scope, playtest: TURN.playtest, undo: TURN.undo });
+    : fill(section, {
+        scope: TURN.scope,
+        // Said where play is: what the agent's plays measure is what the person's Stage shows.
+        playtest: software ? `${TURN.playtest}\n${TURN.software}` : TURN.playtest,
+        undo: TURN.undo,
+      });
 };
 
 /**
@@ -136,8 +141,12 @@ export const firstTurnMessage = (
  * `harnessInstructions`) rather than writing them into the game, so a change to them reaches
  * every game at once.
  */
-export const gameTurnRules = (engine: GameEngineId): string | undefined => {
-  const everyTurn = everyTurnSection(engine);
+export const gameTurnRules = (
+  engine: GameEngineId,
+  /** This machine's browsers draw in software (gameChromium's probe): the rules say so once. */
+  software = false,
+): string | undefined => {
+  const everyTurn = everyTurnSection(engine, software);
   if (everyTurn === undefined) return undefined;
   return `${everyTurn}\n${TURN.keepGoing}`;
 };

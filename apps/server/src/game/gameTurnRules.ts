@@ -8,6 +8,7 @@ import { GameManifest, keptRunTag, playOutcomeWords } from "@kurambit/contracts"
 
 import { decisionsForTurn } from "./GameDecisions.ts";
 import { keptSince, type KeptPlay } from "./playFiles.ts";
+import { gameBrowsersDrawInSoftware } from "./gameChromium.ts";
 import { gameTurnRules } from "./scaffold.ts";
 import { fill, STUDIO_TEXT } from "./studioText.ts";
 
@@ -88,7 +89,7 @@ const gameEngine = (cwd: string) =>
  */
 export const turnRulesForWorkspace = (cwd: string | null) =>
   Effect.map(cwd === null ? Effect.succeed(null) : gameEngine(cwd), (engine) =>
-    engine === null ? undefined : gameTurnRules(engine),
+    engine === null ? undefined : gameTurnRules(engine, gameBrowsersDrawInSoftware() === true),
   );
 
 /**
