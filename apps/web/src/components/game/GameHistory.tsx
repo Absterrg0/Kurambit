@@ -118,7 +118,7 @@ export function GameHistory({
   /** The popover is open: the row scrolls to the newest when it opens. */
   open: boolean;
   undo: GameStripUndo;
-  /** Plays an earlier build from a copy. */
+  /** Plays a build: an earlier one from a copy, the one the folder holds as the live game. */
   onPlay: (build: GameBuild) => void;
   /** A build the loaded pages do not hold (an old round's row). */
   onPlayUnlisted: (ref: GameBuildRef) => void;
@@ -203,13 +203,11 @@ export function GameHistory({
     }
   }
 
+  // The Stage plays the build the folder holds as the live game, never a copy (playBuild).
   const play = (build: GameBuild) => {
     setStepped(build.id);
     onInspect(build);
-    // The folder already is this build: its own game shows it, never a copy
-    // (unless the list knows the folder was edited since).
-    if (list !== null && list.current === build.id && list.folderEdited !== true) onLive();
-    else onPlay(build);
+    onPlay(build);
   };
   // Answered after the render that received it: playing reaches the Stage's own state.
   const answer = useStableCallback((asked: GameStripRequest["request"]) => {

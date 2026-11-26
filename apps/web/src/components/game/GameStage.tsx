@@ -129,7 +129,13 @@ import {
   useTurnUndo,
 } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
-import { GameFrame, GameFrameBox, GamePlaySurface, type StudioMessage } from "./GamePlaySurface";
+import {
+  GameFrame,
+  GameFrameBox,
+  GamePlaySurface,
+  StageChip,
+  type StudioMessage,
+} from "./GamePlaySurface";
 import {
   buildFailurePrompt,
   deriveGameStagePhase,
@@ -887,10 +893,16 @@ function ThreadGameStage({
     if (useGameWorkspaceStore.getState().inspectedBuild?.threadKey === threadKey)
       inspectBuild(null);
   };
-  // An earlier build on the Stage, from a copy: the copy's frame shows it.
+  // An earlier build on the Stage, from a copy: the copy's frame shows it. The build the folder
+  // holds, unedited since, is the live game: picking it (the newest, usually) goes back to live,
+  // so later builds keep landing on the Stage. History and the strip both come through here.
   const playBuild = async (build: GameBuild | GameBuildRef) => {
     const ref: GameBuildRef = "id" in build ? { _tag: "build", build: build.id } : build;
     if (ref._tag !== "build") return;
+    if (ref.build === folderBuild) {
+      backToLive();
+      return;
+    }
     setPlayRef(ref);
     const result = await plays.send(ref);
     if (result === null) return;
@@ -1659,6 +1671,15 @@ function ThreadGameStage({
                   {playTarget.result.message}
                 </p>
               )}
+              {/* An earlier build stays on the Stage while later ones land: said over the game,
+                  where nobody plays it for the newest by mistake, with the way back. */}
+              <StageChip
+                label={`Playing ${playTarget.label}${folderShort === null ? "" : ` · newest is ${folderShort}`}`}
+                onAction={backToLive}
+              >
+                <PlayIcon aria-hidden="true" />
+                Play newest
+              </StageChip>
             </GameFrameBox>
           </div>
         ) : null}

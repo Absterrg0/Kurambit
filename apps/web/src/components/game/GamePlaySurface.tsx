@@ -343,15 +343,10 @@ export function GamePlaySurface({
             )}
             {playing ? overlay : null}
             {playing && held !== null ? (
-              <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
-                <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-caption text-stage-foreground ring-1 ring-white/15">
-                  <span className="min-w-0 truncate">{held.label}</span>
-                  <Button size="xs" variant="secondary" onClick={onTakeHeld}>
-                    <RefreshCwIcon aria-hidden="true" />
-                    {held.action}
-                  </Button>
-                </div>
-              </div>
+              <StageChip label={held.label} onAction={onTakeHeld}>
+                <RefreshCwIcon aria-hidden="true" />
+                {held.action}
+              </StageChip>
             ) : null}
           </GameFrameBox>
         </div>
@@ -363,6 +358,29 @@ export function GamePlaySurface({
         />
       </div>
     </>
+  );
+}
+
+/** One line over the top of the game, with the one button that acts on it. */
+export function StageChip({
+  label,
+  onAction,
+  children,
+}: {
+  label: string;
+  onAction: () => void;
+  /** The button's content. */
+  children: ReactNode;
+}) {
+  return (
+    <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
+      <div className="flex min-w-0 items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-caption text-stage-foreground ring-1 ring-white/15">
+        <span className="min-w-0 truncate">{label}</span>
+        <Button size="xs" variant="secondary" onClick={onAction}>
+          {children}
+        </Button>
+      </div>
+    </div>
   );
 }
 
