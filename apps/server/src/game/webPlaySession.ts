@@ -1436,18 +1436,20 @@ export const openWebPlaySession = async (input: {
           });
       },
       refusedStates: () => refused,
-      still: async (path) =>
-        (await bounded(
-          shoot().then(({ png }) =>
-            png === null
-              ? false
-              : NodeFSP.writeFile(path, png).then(
-                  () => true,
-                  () => false,
-                ),
-          ),
-          PLAY_BOUNDS.stillMs,
-        )) === true,
+      still: async (path, withSmall = false) =>
+        withSmall
+          ? keepShot(path)
+          : (await bounded(
+              shoot().then(({ png }) =>
+                png === null
+                  ? false
+                  : NodeFSP.writeFile(path, png).then(
+                      () => true,
+                      () => false,
+                    ),
+              ),
+              PLAY_BOUNDS.stillMs,
+            )) === true,
       // Once, and never failing: the bot loop and its launch both close the
       // session, and a page our own bound already gave up on has nothing to answer.
       close: once(async () => {

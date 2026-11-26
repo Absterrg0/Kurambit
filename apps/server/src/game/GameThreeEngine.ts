@@ -534,7 +534,7 @@ export const makeThreeBackend = (
                   else if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
                   else await new Promise((resolve) => setTimeout(resolve, 2000));
                   const view = NodePath.join(temporary, `view-${entry}.png`);
-                  if (await session.still(view))
+                  if (await session.still(view, true))
                     views.push({ entry, path: NodePath.relative(ctx.root, view) });
                   if (input.look && entry === "boot" && gameplayUrl !== null) {
                     const refusedBefore = session.refusedStates().length;
@@ -544,7 +544,7 @@ export const makeThreeBackend = (
                     else {
                       await playRandomly(session.input, LOOK_PLAY_MS, signal);
                       const played = NodePath.join(temporary, "view-gameplay.png");
-                      if (await session.still(played))
+                      if (await session.still(played, true))
                         views.push({
                           entry: "gameplay",
                           path: NodePath.relative(ctx.root, played),

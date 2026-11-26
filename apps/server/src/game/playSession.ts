@@ -35,8 +35,11 @@ export interface PlaySession {
   ) => Promise<PlayActObservation>;
   /** The window at another size, as a player's would be. Absent where the runner has no page. */
   readonly resize?: (width: number, height: number) => Promise<void>;
-  /** Writes the picture as it is now to `path`; false when it could not. */
-  readonly still: (path: string) => Promise<boolean>;
+  /**
+   * Writes the picture as it is now to `path`; false when it could not. `small`: its small JPEG
+   * beside it too (smallFramePath), as an act's frame has, for a picture an agent is shown.
+   */
+  readonly still: (path: string, small?: boolean) => Promise<boolean>;
   /** Keys held from now on (the rest let go), taps and clicks, into the page as it runs. */
   readonly input: (input: {
     readonly held: readonly string[];
