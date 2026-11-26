@@ -12,6 +12,7 @@ import type {
   ServerProviderState,
   ServerProviderUsageLimits,
 } from "@kurambit/contracts";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -93,6 +94,16 @@ export interface ServerProviderPresentation {
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
+
+/**
+ * A status check that could not finish, such as a probe that timed out while
+ * running agents load the machine. It says nothing new about the provider, so a
+ * managed provider keeps its last ready snapshot rather than reporting a fault;
+ * with nothing ready to keep, it publishes `snapshot`.
+ */
+export class ProviderStatusUnconfirmed extends Data.TaggedError("ProviderStatusUnconfirmed")<{
+  readonly snapshot: ServerProviderDraft;
+}> {}
 
 export function nonEmptyTrimmed(value: string | undefined): string | undefined {
   if (!value) return undefined;

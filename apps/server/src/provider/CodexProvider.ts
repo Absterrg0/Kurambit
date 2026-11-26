@@ -38,6 +38,7 @@ import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts
 import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
+  ProviderStatusUnconfirmed,
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "@kurambit/provider-core/server/snapshotProbe";
@@ -630,7 +631,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   managedAuth?: ServerProvider["auth"],
 ): Effect.fn.Return<
   ServerProviderDraft,
-  ServerSettingsError,
+  ServerSettingsError | ProviderStatusUnconfirmed,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
   const resolvedEnvironment = environment ?? process.env;
@@ -693,19 +694,21 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   if (Option.isNone(probeResult.success)) {
-    return buildServerProvider({
-      presentation: CODEX_PRESENTATION,
-      enabled: codexSettings.enabled,
-      checkedAt,
-      models: emptyModels,
-      skills: [],
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message: "Timed out while checking Codex app-server provider status.",
-      },
+    return yield* new ProviderStatusUnconfirmed({
+      snapshot: buildServerProvider({
+        presentation: CODEX_PRESENTATION,
+        enabled: codexSettings.enabled,
+        checkedAt,
+        models: emptyModels,
+        skills: [],
+        probe: {
+          installed: true,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message: "Timed out while checking Codex app-server provider status.",
+        },
+      }),
     });
   }
 

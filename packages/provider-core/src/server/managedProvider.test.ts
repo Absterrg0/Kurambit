@@ -18,6 +18,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as ProviderHost from "./ProviderHost.ts";
 import { makeManagedServerProvider } from "./managedProvider.ts";
+import { ProviderStatusUnconfirmed } from "./snapshotProbe.ts";
 
 const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const fastModeCapabilities = createModelCapabilities({
@@ -672,6 +673,51 @@ describe("makeManagedServerProvider", () => {
         const switched = yield* provider.refresh;
         assert.strictEqual(switched.auth.workspaceId, "ws-b");
         assert.strictEqual(switched.usageLimits?.unavailable?.reason, "probeFailed");
+      }),
+    ).pipe(Effect.provide(layerAlwaysRunTest)),
+  );
+
+  it.effect("keeps a ready status through a check that did not finish, and only then", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const {
+          instanceId: _instanceId,
+          driver: _driver,
+          ...timedOut
+        } = {
+          ...initialSnapshot,
+          status: "error" as const,
+          message: "Timed out while running command.",
+        };
+        const finishes = yield* Ref.make(false);
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.get(finishes).pipe(
+            Effect.flatMap((finished) =>
+              finished
+                ? Effect.succeed(refreshedSnapshot)
+                : Effect.fail(new ProviderStatusUnconfirmed({ snapshot: timedOut })),
+            ),
+          ),
+          refreshOnInterval: false,
+        });
+
+        // Nothing ready to keep: the unfinished check is what is known.
+        const unknown = yield* provider.refresh;
+        assert.strictEqual(unknown.status, "error");
+        assert.strictEqual(unknown.message, "Timed out while running command.");
+        assert.strictEqual(unknown.instanceId, initialSnapshot.instanceId);
+
+        yield* Ref.set(finishes, true);
+        assert.deepStrictEqual(yield* provider.refresh, refreshedSnapshot);
+
+        yield* Ref.set(finishes, false);
+        assert.deepStrictEqual(yield* provider.refresh, refreshedSnapshot);
+        assert.deepStrictEqual(yield* provider.getSnapshot, refreshedSnapshot);
       }),
     ).pipe(Effect.provide(layerAlwaysRunTest)),
   );

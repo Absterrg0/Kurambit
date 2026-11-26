@@ -18,6 +18,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as ProviderHost from "./ProviderHost.ts";
 import { applyUsageLimitsUpdate, resolveUsageLimitsAfterProbe } from "./usageLimits.ts";
 import type { ManagedServerProvider } from "./snapshot.ts";
+import { ProviderStatusUnconfirmed, type ServerProviderDraft } from "./snapshotProbe.ts";
 
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
@@ -35,6 +36,19 @@ function withUsageLimits(
   return usageLimits ? { ...rest, usageLimits } : rest;
 }
 
+// An unfinished check's snapshot was never stamped with its instance; it takes the
+// identity of the snapshot it replaces, which the same driver stamped.
+function withIdentityOf(current: ServerProvider, draft: ServerProviderDraft): ServerProvider {
+  return {
+    ...draft,
+    instanceId: current.instanceId,
+    driver: current.driver,
+    ...(current.displayName ? { displayName: current.displayName } : {}),
+    ...(current.accentColor ? { accentColor: current.accentColor } : {}),
+    ...(current.continuation ? { continuation: current.continuation } : {}),
+  };
+}
+
 export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(function* <
   Settings,
 >(input: {
@@ -43,7 +57,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
   readonly initialSnapshot: (settings: Settings) => Effect.Effect<ServerProvider>;
-  readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
+  readonly checkProvider: Effect.Effect<
+    ServerProvider,
+    ServerSettingsError | ProviderStatusUnconfirmed
+  >;
   readonly enrichSnapshot?: (input: {
     readonly settings: Settings;
     readonly snapshot: ServerProvider;
@@ -148,7 +165,28 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return state.snapshot;
     }
 
-    const probedSnapshot = yield* input.checkProvider;
+    const checked = yield* input.checkProvider.pipe(
+      Effect.catchTags({ ProviderStatusUnconfirmed: (unconfirmed) => Effect.succeed(unconfirmed) }),
+    );
+    const current = (yield* Ref.get(snapshotStateRef)).snapshot;
+    // A ready answer for the same settings stands until a check actually finishes, so a
+    // busy machine never reads as a broken agent.
+    if (
+      checked instanceof ProviderStatusUnconfirmed &&
+      current.status === "ready" &&
+      !input.haveSettingsChanged(previousSettings, nextSettings)
+    ) {
+      yield* Effect.logWarning("Provider status check did not finish; kept the last ready one.", {
+        instanceId: current.instanceId,
+        detail: checked.snapshot.message,
+      });
+      yield* Ref.set(settingsRef, nextSettings);
+      return current;
+    }
+    const probedSnapshot =
+      checked instanceof ProviderStatusUnconfirmed
+        ? withIdentityOf(current, checked.snapshot)
+        : checked;
     const { snapshot: nextSnapshot, generation: nextGeneration } = yield* Ref.modify(
       snapshotStateRef,
       (state) => {

@@ -40,6 +40,7 @@ import { applyServerSettingsPatch } from "@kurambit/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
 import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { ProviderStatusUnconfirmed } from "@kurambit/provider-core/server/snapshotProbe";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import * as ModelManifest from "./ModelManifest.ts";
@@ -616,10 +617,11 @@ it.layer(
         yield* TestClock.adjust("21 seconds");
         yield* Effect.yieldNow;
 
-        const status = yield* Fiber.join(statusFiber);
-        assert.strictEqual(status.status, "error");
+        const unconfirmed = yield* Fiber.join(statusFiber).pipe(Effect.flip);
+        assert.instanceOf(unconfirmed, ProviderStatusUnconfirmed);
+        assert.strictEqual(unconfirmed.snapshot.status, "error");
         assert.strictEqual(
-          status.message,
+          unconfirmed.snapshot.message,
           "Timed out while checking Codex app-server provider status.",
         );
         assert.strictEqual(yield* Ref.get(killCalls), 1);

@@ -5,6 +5,7 @@ import {
   type ServerProviderSlashCommand,
   type ServerProviderResetCredits,
 } from "@kurambit/contracts";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -30,6 +31,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   isCommandMissingCause,
   parseGenericCliVersion,
+  ProviderStatusUnconfirmed,
   providerModelsFromSettings,
   spawnAndCollect,
   type ServerProviderDraft,
@@ -419,8 +421,11 @@ const probeClaudeCapabilities = (
         if (!abort.signal.aborted) abort.abort();
       }),
     ),
-    Effect.result,
-    Effect.map((result) => (Result.isSuccess(result) ? result.success : undefined)),
+    // A timeout is the machine being busy, not Claude failing: callers tell the two apart.
+    Effect.catchIf(
+      (error) => !Cause.isTimeoutError(error),
+      () => Effect.succeed(undefined),
+    ),
   );
 };
 
@@ -450,7 +455,9 @@ export const probeClaudeWorkspaceSnapshot = Effect.fn("probeClaudeWorkspaceSnaps
 ): Effect.fn.Return<ProviderWorkspaceSnapshot, never, FileSystem.FileSystem | Path.Path> {
   if (!claudeSettings.enabled) return machineSnapshot;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, environment);
-  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false);
+  const capabilities = yield* probeClaudeCapabilities(claudeSettings, environment, cwd, false).pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
   return {
     ...machineSnapshot,
     skills,
@@ -466,7 +473,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   claudeSettings: ClaudeSettings,
   resolveCapabilities?: (
     claudeSettings: ClaudeSettings,
-  ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined>,
+  ) => Effect.Effect<ClaudeCapabilitiesProbe | undefined, Cause.TimeoutError>,
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   modelCatalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -475,7 +482,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   resolveResetCredits?: (version: string) => Effect.Effect<ServerProviderResetCredits | undefined>,
 ): Effect.fn.Return<
   ServerProviderDraft,
-  never,
+  ProviderStatusUnconfirmed,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
   const resolvedEnvironment = environment ?? process.env;
@@ -532,19 +539,21 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   if (Option.isNone(versionProbe.success)) {
-    return buildServerProvider({
-      presentation: CLAUDE_PRESENTATION,
-      enabled: claudeSettings.enabled,
-      checkedAt,
-      models: allModels,
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message:
-          "Claude Agent CLI is installed but failed to run. Timed out while running command.",
-      },
+    return yield* new ProviderStatusUnconfirmed({
+      snapshot: buildServerProvider({
+        presentation: CLAUDE_PRESENTATION,
+        enabled: claudeSettings.enabled,
+        checkedAt,
+        models: allModels,
+        probe: {
+          installed: true,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message:
+            "Claude Agent CLI is installed but failed to run. Timed out while running command.",
+        },
+      }),
     });
   }
 
@@ -579,15 +588,16 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   const updateRequiredModels = resolveClaudeUpdateRequiredModels(modelCatalog, parsedVersion);
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
+  const capabilitiesProbe = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.result)
+    : Result.succeed(undefined);
+  const capabilities = Result.getOrUndefined(capabilitiesProbe);
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);
 
   if (!capabilities) {
-    return buildServerProvider({
+    const unverified = buildServerProvider({
       presentation: CLAUDE_PRESENTATION,
       enabled: claudeSettings.enabled,
       checkedAt,
@@ -603,6 +613,9 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         message: "Could not verify Claude authentication status from initialization result.",
       },
     });
+    return Result.isFailure(capabilitiesProbe)
+      ? yield* new ProviderStatusUnconfirmed({ snapshot: unverified })
+      : unverified;
   }
 
   if (claudeAuthStatus(capabilities) === "unauthenticated") {

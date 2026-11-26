@@ -17,6 +17,7 @@ import {
   probeCodexSkillsForCwd,
 } from "../CodexProvider.ts";
 import { makeManagedServerProvider } from "@kurambit/provider-core/server/managedProvider";
+import { ProviderStatusUnconfirmed } from "@kurambit/provider-core/server/snapshotProbe";
 import { mergeProviderInstanceEnvironment } from "@kurambit/provider-core/server/instanceEnvironment";
 import {
   type ProviderDriverCreateInput,
@@ -163,7 +164,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
             : {}),
         }),
       ),
-      Effect.catch(() =>
+      Effect.catch((failure) =>
         runtime.auth.read.pipe(
           Effect.orElseSucceed(() => Option.none()),
           Effect.map((current) => ({
@@ -190,6 +191,12 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
               : {}),
             message: "Could not check Codex right now. Retry, or reconnect in provider settings.",
           })),
+          // A check that only timed out keeps the last ready status; see ProviderStatusUnconfirmed.
+          Effect.flatMap((snapshot) =>
+            failure instanceof ProviderStatusUnconfirmed
+              ? Effect.fail(new ProviderStatusUnconfirmed({ snapshot }))
+              : Effect.succeed(snapshot),
+          ),
         ),
       ),
       Effect.scoped,
