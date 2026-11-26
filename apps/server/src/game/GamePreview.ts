@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Paths name the build Play serves; gameWebServer owns the loopback HTTP boundary.
 import * as NodePath from "node:path";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -8,7 +9,9 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import type { PlatformError } from "effect/PlatformError";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
@@ -221,44 +224,85 @@ const make = Effect.gen(function* () {
       if (watches.has(root)) return;
       const scope = Scope.makeUnsafe();
       watches.set(root, scope);
-      // `live` returns once the watch is installed, so a save right after it is seen.
-      const ready = Deferred.makeUnsafe<void>();
-      const settle = () => Deferred.doneUnsafe(ready, Effect.void);
-      yield* fileSystem
-        .watch(NodePath.join(root, directory), { recursive: true, onReady: settle })
-        .pipe(
-          Stream.filter((event) => isLiveChange(event.path)),
-          // Before the settle, which keeps a burst's last path only: a quiet write landing last
-          // must not hide the change before it.
-          Stream.filterEffect((event) =>
-            isQuiet(NodePath.join(root, directory, event.path)).pipe(Effect.map((quiet) => !quiet)),
+      const folder = NodePath.join(root, directory);
+      // Every watch opened for the folder feeds this one queue, so a renewal's overlap only
+      // repeats events, which the settle coalesces.
+      const events = yield* Queue.unbounded<FileSystem.WatchEvent, PlatformError | Cause.Done>();
+      // Resolves once the watch is installed, so a save right after it is seen. A watch that
+      // ends on its own ends the live watch; one a renewal closed does not.
+      const open = Effect.gen(function* () {
+        const watchScope = yield* Scope.fork(scope);
+        const ready = Deferred.makeUnsafe<void>();
+        const settle = () => Deferred.doneUnsafe(ready, Effect.void);
+        yield* fileSystem.watch(folder, { recursive: true, onReady: settle }).pipe(
+          Stream.runForEach((event) => Queue.offer(events, event)),
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit)
+              ? Queue.end(events)
+              : Cause.hasInterruptsOnly(exit.cause)
+                ? Effect.void
+                : Queue.failCause(events, exit.cause),
           ),
-          // A folder made (Blender's first export makes assets/blender/) changes
-          // nothing the game loads; the files then written in it each count.
-          Stream.filterEffect((event) =>
-            event._tag !== "Create"
-              ? Effect.succeed(true)
-              : fileSystem.stat(NodePath.join(root, directory, event.path)).pipe(
-                  Effect.map((info) => info.type !== "Directory"),
-                  Effect.orElseSucceed(() => true),
-                ),
-          ),
-          Stream.map((event) => event.path),
-          Stream.debounce(LIVE_SETTLE),
-          Stream.runForEach(onChange),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("The game's live watch ended; Reload still works.", { root, cause }),
-          ),
-          // A watch that ended on its own leaves room for the next `live` to open one.
-          Effect.ensuring(
-            Effect.sync(() => {
-              settle();
-              if (watches.get(root) === scope) watches.delete(root);
-            }),
-          ),
-          Effect.forkIn(scope),
+          Effect.ensuring(Effect.sync(settle)),
+          Effect.forkIn(watchScope),
         );
-      yield* Deferred.await(ready);
+        yield* Deferred.await(ready);
+        return watchScope;
+      });
+      let current = yield* open;
+      // Node's recursive watch on Linux (Node 24.21, which Electron ships) stops hearing a file
+      // once it is replaced by rename, as agents' atomic writes and Keep values do; the replace
+      // itself is still heard. So each settled burst, whoever's it is, opens a fresh watch
+      // before closing the old, and only then pushes: whatever was written before the fresh
+      // watch was ready is already on disk for the reload, and anything after it is heard.
+      const renew = Effect.gen(function* () {
+        const previous = current;
+        current = yield* open;
+        yield* Scope.close(previous, Exit.void);
+      });
+      // A folder made (Blender's first export makes assets/blender/) changes
+      // nothing the game loads; the files then written in it each count.
+      const isGameChange = (event: FileSystem.WatchEvent) =>
+        !isLiveChange(event.path)
+          ? Effect.succeed(false)
+          : Effect.gen(function* () {
+              const file = NodePath.join(folder, event.path);
+              if (yield* isQuiet(file)) return false;
+              if (event._tag !== "Create") return true;
+              return yield* fileSystem.stat(file).pipe(
+                Effect.map((info) => info.type !== "Directory"),
+                Effect.orElseSucceed(() => true),
+              );
+            });
+      // Judged per event, before the settle that keeps a burst's last event only: a quiet
+      // write landing last must not hide the change before it.
+      let changed: string | undefined;
+      yield* Stream.fromQueue(events).pipe(
+        Stream.tap((event) =>
+          Effect.map(isGameChange(event), (game) => {
+            if (game) changed = event.path;
+          }),
+        ),
+        Stream.debounce(LIVE_SETTLE),
+        Stream.runForEach(() =>
+          Effect.gen(function* () {
+            yield* renew;
+            const path = changed;
+            changed = undefined;
+            if (path !== undefined) yield* onChange(path);
+          }),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("The game's live watch ended; Reload still works.", { root, cause }),
+        ),
+        // A watch that ended on its own leaves room for the next `live` to open one.
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (watches.get(root) === scope) watches.delete(root);
+          }),
+        ),
+        Effect.forkIn(scope),
+      );
     });
   const openServer = (root: string, directory: string) =>
     Effect.tryPromise({
