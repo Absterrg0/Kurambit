@@ -196,41 +196,40 @@ control is disabled and says why.
 To start, choose **Keep going** in the picker beside the paperclip, under the box where you tell the
 game what to change (it says **Once** until you change it; `mod+Shift+A` opens it), then send. The
 picker appears once Keep going has something to go on, when a build starts and your agent's reply
-ends in a `Next:` line. What you write is its
-direction, the first thing it does; you can also send nothing and let it take your agent's latest
-`Next:` line. While it runs, a line above the box says which step it is on, with **Stop**, and what
-you send goes to it as its next step. **Keep going: Guided** and **Keep going: Autopilot** in the
-command palette choose it and start it at once. Its mode is in the same picker:
-
-- **Guided:** each next step is proposed above the composer, "Step 3 · a failing check: …", and
-  starts at the time shown unless you act. **Start now** starts it, **Skip** sets it aside for this
-  run, and **Edit** puts its text in the composer and holds it, so you can change it and send it as
-  your own message.
-- **Autopilot:** the agent takes each step at once.
+ends in a `Next:` line. What you write is its direction: every step works on it, a part at a time,
+until your agent says all of it is done. You can also send nothing and let it take your agent's
+latest `Next:` line. While it runs, a line above the box says which step it is on, with **Stop**,
+and what you send is added to its direction. **Keep going** in the command palette starts it at
+once with what is in the box.
 
 Pick a budget in the same picker, from 30 minutes to 8 hours or no limit (1 hour unless you change
-it); while keep going runs, it shows when it ends. **Stop** above the box, or `mod+Alt+X`, stops it: a step that is running stops and
-still becomes a build.
+it); while keep going runs, it shows how much is left. Only your agent's work on its steps spends
+the budget: waiting for checks, and time Kurambit is closed, do not. **Stop** above the box, or
+`mod+Alt+X`, stops it: a step that is running stops and still becomes a build.
 
 The first step starts at once, from what you wrote or your agent's latest `Next:` line, and each step starts as soon
 as the one before it is checked to still start cleanly; the rest of its measuring goes on behind.
+A step gets up to 15 minutes of your agent's own work; time it spends waiting for a check or for
+Blender does not count. A step that runs out of time is finished by the next one.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
-and why: notes you left for it first, then a crash or freeze, then a step that was undone, then,
-when you asked for the game to match a picture, what your agent's last check found still differs
-most from it, then a failing check, then the biggest problem a separate model sees in screenshots of
-the game as it is now (shown only your brief), then the agent's newest `Next:` line. Because that
-review nearly always finds something, a run ends on its budget or when steps stop changing the game
-rather than when your agent says it is done. A step runs in a fresh session of your agent,
-so it costs what the step is worth rather than re-reading the whole chat; its message carries what
-the agent needs (your brief, the chat's last reply, the current checks and the steps so far). Your
+and why: your direction first, while any of it is left, then a step that ran out of time, a crash
+or freeze, a step that was undone, then, when you asked for the game to match a picture, what your
+agent's last check found still differs most from it, then a failing check a player would hit, then
+the agent's newest `Next:` line, and only when none is left, the biggest problem a separate model
+sees in screenshots of the game as it is now (shown only your brief). A step runs in a fresh
+session of your agent, so it costs what the step is worth rather than re-reading the whole chat;
+its message carries what the agent needs (your brief and direction, the chat's last reply, the
+current checks and the steps so far). Your
 own messages keep your agent's session, and it is told what the steps did. The step's build is
 played and measured like any turn. Its builds sit under one **Keep going** bracket in the builds
 list, and its line in the chat says what the step did and what happened to it:
 
 - **kept**: the game still boots and plays without errors. Every other check (controls, Retry, the
-  HUD) is shown and, when it is bad, proposed as a later step, but never a reason to undo; an error
-  the longer random-input play finds after a step was kept becomes the next step;
+  HUD) is shown and never a reason to undo; a bad Retry, HUD or screen size check is proposed as a
+  later step, while the controls check is only shown, since a key that acts on one screen can read
+  as unused. An error the longer random-input play finds after a step was kept becomes the next
+  step;
 - **undone**: the step broke the game, so Kurambit put back the build the step started from. The
   chat says why ("undone: it stopped booting: …"), and the next step is told too. **Redo** in the
   chat or the build's tab puts the step back if you want it anyway, and keep going goes on from
@@ -244,14 +243,15 @@ keep going waits for it to end. Stopping a step's turn with the chat's Stop paus
 
 Keep going stops by itself when two steps in a row are undone or change nothing, when its budget is
 up, or when nothing is left to propose and your agent says `Next: none`. It does not judge whether a change made the game better:
-that is yours to say. The banner above the composer says why in one line, and
-**Resume** (or choosing a mode again) carries on with the same run. **See what it did** there, or
+that is yours to say. The banner above the composer says why in one line, until you send your next
+message, and **Resume** (or turning it on again) carries on with the same run and its direction;
+turning it on with new words replaces the direction. **See what it did** there, or
 **Show what keep going did** in the command palette, lists the run's steps: each with a picture of
 the game before and after it, what it set out to change, and whether it was kept or undone, so a
 run left going overnight reads in the morning. **Play** plays any step's build. After the agent says the game is
-done, ask it for more and turn keep going on again. The command palette has **Keep going: Guided**,
-**Keep going: Autopilot**, **Stop Keep going**, and the proposal's **Start the proposed step now** and
-**Skip the proposed step**. Your agent can turn keep going on or off and leave it notes itself.
+done, ask it for more and turn keep going on again. The command palette has **Keep going** (or
+**Resume Keep going**) and **Stop Keep going**. Your agent can turn keep going on or off and add to
+its direction itself.
 
 ## Play and revise
 

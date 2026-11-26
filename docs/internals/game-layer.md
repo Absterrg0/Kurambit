@@ -572,9 +572,11 @@ timer (a cap set again, a recovery wake) records itself on its step. A game has 
 `GameRunControl` reads and dispatches under the project's lock, so two chats turning it on at once
 cannot both find none.
 
-- **A step is an ordinary chat turn, in a fresh provider session.** The cycle is look, then
-  (Guided) a proposal, then the turn, a judge, maybe an undo, then the step's record, then look
-  again. The turn is a message the run posts into the chat with `freshContext`, so a step does not
+- **A step is an ordinary chat turn, in a fresh provider session.** The cycle is look, then the
+  turn, a judge, maybe an undo, then the step's record, then look again. Keep going is on or off,
+  nothing more: a mode that proposed each step and started it after a countdown made design
+  changes while the person was in another game, so every step starts at once and Stop is the
+  person's control. The turn is a message the run posts into the chat with `freshContext`, so a step does not
   re-read the whole chat (one step read 7.8 M tokens that way); the message carries a compact
   briefing instead (BRIEF.md, the chat's last reply, the facts, the steps so far). `freshContext` is
   T3's own fresh native session on the thread's provider thread, the one a failed resume falls back
@@ -587,10 +589,14 @@ cannot both find none.
   keep or undo, and when to stop.
 - **The proposal costs no tokens.** The policy writes the step from the facts' own wording and the
   chat's newest `Next:` line, so a reply without one never wipes the plan (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
-  the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
-  blocker, a retry of an undone step, a failing fact, the agent's next line. Only
-  what a player would hit is proposed (errors, controls, Retry, HUD, other screen sizes), and only
-  health (boots, errors) undoes. A build is measured only for what a person acts on: it boots, the
+  the Next banner exactly the line the run will use), in a fixed order: the person's direction, a
+  step the time cap cut off, a blocker, a retry of an undone step, the reference picture's
+  difference, a failing fact, the agent's next line, and only then fresh eyes, which the look does
+  not even ask for while a direction or a `Next:` remains (taste from screenshots outranked plans
+  and burned steps on title buttons). Only what a player would hit is proposed (errors, Retry, HUD,
+  other screen sizes). The controls fact is shown, never proposed: it sees only whether a declared
+  action was read during one scripted run, and steps "fixing" it rebound a game's jump to Enter.
+  Only health (boots, errors) undoes. A build is measured only for what a person acts on: it boots, the
   QA play and the game at phone and widescreen, one random-input play for errors, freezes and
   frame rate. Endings with no or random input, motion, input response, the scene report's rows and
   asset counts were cut: nobody acted on them, and the plays cost minutes between steps.
@@ -606,8 +612,8 @@ cannot both find none.
   the run, since a step's undo would take those edits.
 - **Never two writers.** Keep going runs in the game folder only, never in a copy. A look waits
   until no turn runs or is queued on any chat working in the game folder; a
-  step turn that comes up queued is cancelled and the run looks again; any other turn or folder
-  move supersedes a pending proposal. A step acts only on the build its look read: its turn
+  step turn that comes up queued is cancelled and the run looks again. A step acts only on the
+  build its look read: its turn
   reports the folder's build at its start (`startBuild`), the judge and the undo use that build,
   and a turn that started on any other build (a Redo, a restore, a person's turn landing during the
   look) is never judged or undone, so the run looks again. A step the person redid is never
@@ -632,12 +638,18 @@ cannot both find none.
   without bound; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
   otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
   While the budget has a minute left another turn starts, capped at the time left (at most
-  15 min) and told so when that is shorter, and it is what bounds an Autopilot that keeps adding
-  content: a fixed "typical step" ended runs with minutes unused. Every ending but `done` resumes.
+  15 min) and told so when that is shorter, and it is what bounds a run that keeps adding
+  content: a fixed "typical step" ended runs with minutes unused. Both clocks count work, never
+  the wall: the budget is spent only by the step turns' own runs' time (`budgetUsedMs`), and the
+  cap only by the agent's (`stepTurnTime`: no waits on `game_check` or `game_blender`, whose
+  measuring queue and software renderer took most of a capped step, and no time the app was off
+  between a turn and its restart continuation, which once used up a run's hour). A cap that finds
+  less spent sets itself again for the rest, with a backstop at three times the cap of the runs'
+  own time so a tool that never answers cannot hold a step. Every ending but `done` resumes.
 - **Never repeat.** Each proposal has a key (`fact:<id>`, `steer:<fnv>`, `next:<fnv>`; a retry
-  carries the undone step's). Two misses of a key (undone, or kept with its target still bad), any
-  step that changed nothing (it is never sent again as it was), or Skip set the key aside for the
-  run. Across runs and chats, the look also reads the keys of what the person undid, went
+  carries the undone step's). Two misses of a key (undone, or kept with its target still bad), or
+  a step that finished and changed nothing (it is never sent again as it was) set the key aside
+  for the run; one the cap cut off before it changed anything is finished instead. Across runs and chats, the look also reads the keys of what the person undid, went
   back from or skipped from the game's decisions (`decidedKeys`), and passes over them the same
   way: a person's undone turn carries the `next:` key of its request, so the Next line it acted on
   is not proposed again.
@@ -647,25 +659,31 @@ cannot both find none.
   the `.studio/bot` an earlier Kurambit wrote stays as it is through an undo. Games from earlier
   runs keep their `game-builds/bots/<run>` setup points, which list as the build they were written
   on.
-- **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
-  start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
-  (superseded, stopped) gives them back ahead of newer notes. A note only ever appends, so Slice 2
-  can count on that prefix (`capturedSteer`).
+- **The person's direction stays until a step says it is done.** `GameRun.steer` is the
+  direction: a start or resume with the person's words replaces it, a steer appends. Nothing takes
+  it off the run when a step starts: notes taken at the start were lost when a capped step was
+  followed by a fact or the reviewer, and a two-part direction never got its second part. Every
+  step carries it (`GameRunTurnStep.steer`) and its briefing shows it in full; while any is left it
+  is the first proposal, with the part the cap cut off or the last direction step's `Next:`. A kept
+  direction step whose reply has a `Direction: done` line (`directionDone`) retires the entries it
+  carried. A step the cap stopped is finished once by the next (`GameRun.finish`).
 - **Long work runs in jobs, never in effects.** An effect claim is a short lease on a pool every
   thread's provider work shares. `game-run.step.execute` hands the step to `GameRunJobs` and
   settles at once; the job reports with `game-run.step.complete` or `.fail`. A turn's cap and a
   resend are short, so they run inside their effects, which stay unsettled until done. Every
   report carries its attempt and a derived command id, so a late or repeated report is refused or
   is a receipt.
-- **The outbox timer exception.** The outbox runs a thread's effects in order. A turn's cap and a
-  proposal's deadline wait minutes on the chat, so keep going enqueues its timers with
+- **The outbox timer exception.** The outbox runs a thread's effects in order. A turn's cap waits
+  minutes on the chat, so keep going enqueues its timers with
   `holdsThread: false` and a pending one holds nothing back
   ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the
   person's own turns would wait out every cap. Each timer checks the run again when it fires.
 - **Recovery** (`GameRunRecovery`, at startup): a step whose job died gets it again through a
   `recover` timer, behind whatever its thread still owes, and a run whose step it cannot schedule
   pauses with the cause rather than sit on it; a judge or undo a pause cut off runs
-  again on resume. A step turn T3 carried over a restart that its run no longer wants (Off, an
+  again on resume. A proposal an earlier Kurambit's Guided mode left waiting starts
+  (`game-run.decision.expire`, which its still-queued deadline effect also sends); old runs, steps
+  and effects keep decoding. A step turn T3 carried over a restart that its run no longer wants (Off, an
   ended run, a step moved past) is interrupted, so nothing edits a game the person stopped.
 
 ## Why this shape
