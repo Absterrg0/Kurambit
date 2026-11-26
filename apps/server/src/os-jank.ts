@@ -94,14 +94,27 @@ export const fixPath = Effect.fn("fixPath")(function* (options?: {
       }),
     ),
   );
-  if (options?.shellEnvironmentPrepared === true) return;
-  yield* Effect.sync(() => hydratePosixPath(env, platform)).pipe(
-    Effect.catchDefect((defect) =>
-      Effect.sync(() => {
-        logPathHydrationWarning("Failed to hydrate PATH from the user environment.", defect);
-      }),
-    ),
-  );
+  if (options?.shellEnvironmentPrepared !== true) {
+    yield* Effect.sync(() => hydratePosixPath(env, platform)).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.sync(() => {
+          logPathHydrationWarning("Failed to hydrate PATH from the user environment.", defect);
+        }),
+      ),
+    );
+  }
+  // Native agent installers (Claude's install.sh, which the setup wizard runs)
+  // put the CLI in ~/.local/bin. A login shell lists that directory only once
+  // it exists, and PATH is read once here, so a CLI installed while Kurambit
+  // runs would stay "not found" until a restart. Providers resolve their binary
+  // against this PATH on every status check, so listing the directory up front,
+  // last so it never shadows the user's own order, lets Refresh find it.
+  const home = env.HOME?.trim();
+  if (home) {
+    const userBinDir = (yield* Path.Path).join(home, ".local", "bin");
+    const merged = mergePathEntries(env.PATH, userBinDir, platform);
+    if (merged) env.PATH = merged;
+  }
 });
 
 export const expandHomePath = Effect.fn(function* (input: string) {

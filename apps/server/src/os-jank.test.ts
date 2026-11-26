@@ -67,8 +67,8 @@ effectIt.effect.each(["darwin", "linux"] as const)(
           );
 
           assert.equal(probe.mock.calls.length, 0);
-          assert.equal(env.PATH, "/prepared/bin:/usr/bin");
           assert.equal(env.HOME, NodeOS.userInfo().homedir);
+          assert.equal(env.PATH, `/prepared/bin:/usr/bin:${env.HOME}/.local/bin`);
         }),
       (probe) => Effect.sync(() => probe.mockRestore()),
     ),
@@ -85,7 +85,12 @@ effectIt.effect("hydrates PATH when the desktop handoff is absent", () =>
     ),
     (probe) =>
       Effect.gen(function* () {
-        const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
+        // The native installer's target is listed even before it exists.
+        const env: NodeJS.ProcessEnv = {
+          SHELL: "/bin/bash",
+          PATH: "/usr/bin",
+          HOME: "/home/new-user-without-local-bin",
+        };
 
         yield* fixPath().pipe(
           Effect.provideService(HostProcess.Platform, "linux"),
@@ -94,7 +99,10 @@ effectIt.effect("hydrates PATH when the desktop handoff is absent", () =>
         );
 
         assert.equal(probe.mock.calls.length, 1);
-        assert.equal(env.PATH, "/opt/tools/bin:/usr/bin");
+        assert.equal(
+          env.PATH,
+          "/opt/tools/bin:/usr/bin:/home/new-user-without-local-bin/.local/bin",
+        );
       }),
     (probe) => Effect.sync(() => probe.mockRestore()),
   ),
