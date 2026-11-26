@@ -301,10 +301,10 @@ const checkHandlers = {
       input,
       {
         look: (look) => check(look?.fresh === true),
-        // The turn's last look, with its critique and the status line. The full check is the
-        // build's measure after the turn alone: run inside the turn too, it held the agent for
-        // most of a minute and ran again whenever the agent edited after it. Keep going reads
-        // the critique back from this call's input (GameRunStepRunner).
+        // A look whose input carries a Keep going reference step's critique, which the step
+        // runner reads back from this call (GameRunStepRunner). Offered as any turn's last
+        // look, it becomes a habit that costs every turn a look. The full check is the build's
+        // measure.
         final: () =>
           check(false).pipe(
             Effect.flatMap((answer) =>
