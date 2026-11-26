@@ -1424,7 +1424,7 @@ export const layer: Layer.Layer<
             ...(personRuns === null
               ? []
               : [`<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>`]),
-            ...(slash ? [] : (input.gameNotes ?? [])),
+            ...(input.gameNotes ?? []),
           ];
           const turnInput = {
             appThread: input.appThread,

@@ -1481,8 +1481,12 @@ const make = Effect.gen(function* () {
    * What the measure found wrong in the build the folder holds, beside the person's next message.
    * The measure lands after the turn that made the build, and an agent reads facts only when it
    * asks (op list), so without this a problem the person sees on the build never reached the agent.
-   * The same bad readings the build's line counts as problems, in keep going's words for them.
+   * The bad readings the build's line counts as problems, in keep going's words for them, but for
+   * First minute's: they name neither the input nor the line they missed, so an agent chases them
+   * without moving them. A reading the chat's last note already gave, unchanged (by the compare's
+   * "same": its value, else its text), is the agent's choice made, not news, and is left out.
    */
+  const told = new Map<ThreadId, ReadonlySet<string>>();
   const problemsNote: GameTurnNotes.GameTurnNote = ({ threadId, person }) =>
     Effect.gen(function* () {
       if (!person) return null;
@@ -1491,11 +1495,22 @@ const make = Effect.gen(function* () {
       const record = id === null ? null : yield* recordOf(g, id);
       const resolved = id === null ? undefined : (yield* resolveOf(g, [id])).get(id);
       if (record === null || resolved === undefined) return null;
-      const problems = gameFactsView(yield* facts.read(resolved)).flatMap((view) =>
-        view.reading._tag === "measured" && view.reading.tone === "bad"
-          ? [`- ${view.label}: ${view.reading.text}`]
+      const bad = gameFactsView(yield* facts.read(resolved)).flatMap((view) =>
+        view.id !== "first-minute" &&
+        view.reading._tag === "measured" &&
+        view.reading.tone === "bad"
+          ? [
+              {
+                key: `${view.id} ${view.reading.value ?? view.reading.text}`,
+                line: `- ${view.label}: ${view.reading.text}`,
+              },
+            ]
           : [],
       );
+      // In memory: after a restart a chat is told its readings once more, never left untold.
+      const before = told.get(threadId);
+      told.set(threadId, new Set(bad.map((each) => each.key)));
+      const problems = bad.flatMap((each) => (before?.has(each.key) ? [] : [each.line]));
       if (problems.length === 0) return null;
       return [
         "<kurambit_game_problems>",

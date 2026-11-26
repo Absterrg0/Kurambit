@@ -1086,10 +1086,14 @@ export const layer: Layer.Layer<
       if (!runningWrite.committed) {
         return;
       }
-      const gameNotes = yield* turnNotes.notes({
-        threadId: projection.thread.id,
-        person: message.createdBy === "user",
-      });
+      // A slash command stays first in its prompt with nothing beside it, so it reads no note: a
+      // note read is one the game layer counts as told.
+      const gameNotes = message.text.trimStart().startsWith("/")
+        ? []
+        : yield* turnNotes.notes({
+            threadId: projection.thread.id,
+            person: message.createdBy === "user",
+          });
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
