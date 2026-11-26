@@ -48,6 +48,24 @@ export const DEFAULT_MAIN_WINDOW_SIZE = {
   width: 1100,
   height: 780,
 } as const;
+// A first launch fills most of the screen it opens on: the chat and the Stage
+// sit side by side, and a fixed 1100×780 left a large screen mostly empty.
+const DEFAULT_MAIN_WINDOW_SCREEN_SHARE = 0.85;
+
+export function defaultMainWindowSize(
+  workArea: { readonly width: number; readonly height: number } | undefined,
+): { readonly width: number; readonly height: number } {
+  if (workArea === undefined) return DEFAULT_MAIN_WINDOW_SIZE;
+  const fit = (available: number, minimum: number) =>
+    Math.min(
+      available,
+      Math.max(minimum, Math.round(available * DEFAULT_MAIN_WINDOW_SCREEN_SHARE)),
+    );
+  return {
+    width: fit(workArea.width, MIN_MAIN_WINDOW_SIZE.width),
+    height: fit(workArea.height, MIN_MAIN_WINDOW_SIZE.height),
+  };
+}
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   localEnvironmentEnabled: true,
