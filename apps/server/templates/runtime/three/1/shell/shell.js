@@ -119,6 +119,8 @@ let hidden = false;
 let frozen = false;
 /** Play holds while its tab is hidden; the game decides what pause looks like. */
 let tabHidden = false;
+/** The animation loop's last frame; up here, as a tab shown while the game loads moves it too. */
+let last = 0;
 /** The harness's model sheet is over the page (shell/sheet.js): play holds under it. */
 let sheetShown = false;
 let redraw = true;
@@ -152,8 +154,11 @@ const runTunes = new Map();
 const runKey = (play) => `${play.seed}:${play.clock?.join(":") ?? ""}`;
 /** Runs played to an end on a page the Stage does not hold, for the harness to keep. */
 const finishedPlays = [];
-/** Most steps one frame runs: a slow frame catches up at most 0.1 s, as play always has. */
-const CATCH_UP_S = 0.1;
+/**
+ * Most play one frame steps, in fixed steps: play keeps real time down to 4 frames a second (a
+ * software-drawn Stage), and a hitch moves play at most this far.
+ */
+const CATCH_UP_S = 0.25;
 /** A replay steps as fast as this much of each frame allows. */
 const REPLAY_FRAME_MS = 12;
 /** Past where the kept run ended, a replay plays on this long before it calls the run unended. */
@@ -714,6 +719,8 @@ window.addEventListener("pagehide", leaveRun);
 // with CSS, which leaves the page visible, so its own hold is unaffected.
 document.addEventListener("visibilitychange", () => {
   tabHidden = document.visibilityState === "hidden";
+  // The time away was no frame: the first one back steps once, not a catch-up.
+  if (!tabHidden) last = performance.now();
   applyHold();
 });
 
@@ -1302,7 +1309,7 @@ const straightToPlay =
   new URLSearchParams(location.search).has("play") || location.hash.includes("kurambit-play");
 startRun({ title: !straightToPlay });
 
-let last = performance.now();
+last = performance.now();
 // The scene report's last sample, which ran after the previous draw: the measuring's own time
 // stays out of the frame times the performance fact and the render scale judge the game by.
 let measuredMs = 0;

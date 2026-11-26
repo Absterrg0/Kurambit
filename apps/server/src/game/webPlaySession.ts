@@ -1066,9 +1066,9 @@ export const openWebPlaySession = async (input: {
         }
         return true;
       };
-      // From the first input, play is stepped in slices of one slow frame's game time (the
-      // shell's catch-up), each followed by a read: a slice costs about what a frame costs a
-      // person, so the first change is timed as they would see it.
+      // From the first input, play is stepped in slices of a few frames' game time, each
+      // followed by a read: a slice costs about what a frame costs a person, so the first change
+      // is timed as they would see it.
       const pass = async (ms: number, what: string) => {
         let left = ms;
         while (seen.watch !== null && left > 0) {
