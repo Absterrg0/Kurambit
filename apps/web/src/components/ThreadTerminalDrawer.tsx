@@ -1078,11 +1078,14 @@ function TerminalSessionViewport({
     previousSessionRef.current = current;
   }, [terminalOutput, terminalError, terminalStatus, terminalVersion]);
 
-  // Each new request focuses again, even when nothing else changed.
+  // Each new request focuses again, even when nothing else changed. Like the surface's own
+  // focus, the mount's must not scroll: in the welcome wizard's scrolling list it would push
+  // the agent row that opened this terminal out of view.
   const focusRequest = autoFocus && canOperateTerminal && visible ? focusRequestId : null;
   useEffect(() => {
     if (focusRequest === null) return;
-    (terminalRef.current ?? containerRef.current)?.focus();
+    if (terminalRef.current) terminalRef.current.focus();
+    else containerRef.current?.focus({ preventScroll: true });
   }, [focusRequest]);
 
   // The surface measures its mount, so each drawer resize or window resize refits it.
