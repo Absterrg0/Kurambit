@@ -130,14 +130,15 @@ export function useStageRewind(threadRef: ScopedThreadRef, keep: (message: Studi
     }
     const replayed = await replay({ play: run.play, step: run.play.steps }, playSeconds(run.play));
     if (replayed === null) return;
-    setSide(null);
-    setNotice(resumeNotice(run.play, replayed));
-    setTimeline({ play: run.play, at: replayed.seconds ?? null, fork: null });
     // The page hands a replay over frozen, the person's own pause for pointing at things, where
     // the first click picks. Coming back after a reload is no such pause: the run plays on, and
     // the Stage holds it as it holds any game (Click to play while the person is elsewhere).
+    // Played on first, so what the resume found stays on the bar's time for the next pause.
     const bridge = useStageBridge.getState();
     if (bridge.owner === run.owner && bridge.frozen) toggleStageFreeze();
+    setSide(null);
+    setNotice(resumeNotice(run.play, replayed));
+    setTimeline({ play: run.play, at: replayed.seconds ?? null, fork: null });
   });
   useEffect(() => {
     if (ready) void resume();

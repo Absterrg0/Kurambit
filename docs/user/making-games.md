@@ -392,10 +392,10 @@ what fills it:
   outside its update. Your agent can save runs the same way, and both of you can
   list and delete them.
 - **Back where you were (three.js).** When your agent changes the game while you play, **Reload**
-  brings the new game back to the moment you were at, frozen, replaying your run on the changed
-  code: press **Play** to keep going, or **Restart**. Hovering the bar's time says where the change
-  first made play differ, or that the run now ends earlier ("With the change, this run now ends at
-  1:40").
+  (or **Play it** on a new build) brings the new game back to the moment you were at, replaying
+  your run on the changed code, and you play on from there; **Restart** starts over. Pause, and
+  hovering the bar's time says where the change first made play differ, or that the run now ends
+  earlier ("With the change, this run now ends at 1:40").
   A run on a title screen, an ended run, and runs over 10 minutes start fresh instead, and so does
   one that takes over 20 seconds to get back to.
 - **Rewind and fork (three.js).** Paused, or after a run ends, the bar's timeline shows the run
