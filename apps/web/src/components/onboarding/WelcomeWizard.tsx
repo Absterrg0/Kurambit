@@ -29,7 +29,15 @@ import {
   selectOnboardingProvidersByDriver,
 } from "../../onboarding/providerReadiness.logic";
 import { randomUUID } from "../../lib/utils";
-import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
+import {
+  useEnvironmentProviders,
+  useEnvironments,
+  usePrimaryEnvironment,
+} from "../../state/environments";
+import {
+  deriveProviderInstanceEntries,
+  isProviderInstancePickerReady,
+} from "../../providerInstances";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
@@ -174,6 +182,23 @@ function AgentsStep({
 }) {
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironment()?.environmentId ?? null;
+  // Home's agent picker asks the same question, so finishing here means a new
+  // game can start there.
+  const providersByEnvironment = useEnvironmentProviders();
+  const providerLists = environmentIds.map((environmentId) =>
+    providersByEnvironment.get(environmentId),
+  );
+  const agentReady = providerLists.some((providers) =>
+    deriveProviderInstanceEntries(providers ?? []).some(isProviderInstancePickerReady),
+  );
+  // Until the first checks report, no agent is ready yet but none is missing either.
+  const checkingAgents =
+    !agentReady &&
+    providerLists.some(
+      (providers) =>
+        providers === undefined ||
+        providers.some((provider) => getOnboardingProviderState(provider) === "checking"),
+    );
   return (
     <StepShell
       title="Connect your agents"
@@ -198,8 +223,21 @@ function AgentsStep({
           ))}
         </div>
       </ScrollArea>
-      <div className="mt-6 flex justify-end">
-        <Button disabled={isFinishing} onClick={onContinue}>
+      <div className="mt-6 flex items-center justify-end gap-2">
+        {agentReady ? null : checkingAgents ? (
+          <p className="mr-auto text-meta text-muted-foreground">Checking your agents…</p>
+        ) : (
+          <>
+            <p className="mr-auto text-meta text-muted-foreground">
+              Games need a ready agent. You can look around now and connect one later in Settings →
+              Providers.
+            </p>
+            <Button variant="ghost-muted" disabled={isFinishing} onClick={onContinue}>
+              Look around first
+            </Button>
+          </>
+        )}
+        <Button disabled={isFinishing || !agentReady} onClick={onContinue}>
           {isFinishing ? "Finishing setup…" : "Start making games"}
           <ArrowRightIcon className="size-3.5" />
         </Button>

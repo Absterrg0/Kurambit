@@ -84,7 +84,7 @@ export function ProjectDefaultsSettings({
   // never a different default that no game would use.
   const selection =
     settings.defaultModelSelection === null && target?.projectId == null && entries.length > 0
-      ? newGameFallback(entries, providers, settings, lastGameModel)
+      ? newGameFallback(entries, providers, lastGameModel)
       : resolveDefaultProviderModelSelection(providers, settings.defaultModelSelection);
   const modelOptions = getCustomModelOptionsByInstance(
     settings,

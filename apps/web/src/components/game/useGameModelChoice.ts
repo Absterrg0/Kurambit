@@ -4,15 +4,13 @@ import { ModelSelection, type EnvironmentId } from "@kurambit/contracts";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
-import {
-  getCustomModelOptionsByInstance,
-  resolveAppModelSelectionState,
-} from "../../modelSelection";
+import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
   isProviderInstancePickerReady,
+  NO_PROVIDER_MODEL_SELECTION,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { useEnvironmentProviders } from "../../state/environments";
@@ -28,13 +26,12 @@ export const useLastGameModel = (environmentId: string) =>
 /**
  * PURE. What a new game starts on when Settings names no model for new games:
  * the one the person's last game used while its provider is usable, else
- * Claude's own default, else the first ready provider's. Settings shows this
- * same answer, so the setting and Home's box never disagree.
+ * Claude's own default, else the first ready provider's, else no agent at all.
+ * Settings shows this same answer, so the setting and Home's box never disagree.
  */
 export const newGameFallback = (
   entries: ProviderEntries,
   providers: Parameters<typeof getDefaultProviderInstanceModel>[0],
-  settings: Parameters<typeof resolveAppModelSelectionState>[0],
   lastGameModel: ModelSelection | null,
 ): ModelSelection => {
   const isReady = (instanceId: string) =>
@@ -48,11 +45,12 @@ export const newGameFallback = (
     entries.find(
       (entry) => entry.driverKind === "claudeAgent" && isProviderInstancePickerReady(entry),
     ) ?? entries.find(isProviderInstancePickerReady);
-  const textDefault = resolveAppModelSelectionState(settings, providers);
-  const instanceId = firstChoice?.instanceId ?? textDefault.instanceId;
+  // An agent that is not ready would fail the game's first turn; choosing none
+  // leaves the box saying so until one is.
+  if (firstChoice === undefined) return NO_PROVIDER_MODEL_SELECTION;
   return {
-    instanceId,
-    model: getDefaultProviderInstanceModel(providers, instanceId) ?? textDefault.model,
+    instanceId: firstChoice.instanceId,
+    model: getDefaultProviderInstanceModel(providers, firstChoice.instanceId) ?? "",
   };
 };
 
@@ -81,8 +79,7 @@ export function useGameModelChoice(environmentId: EnvironmentId) {
     isReady(settings.defaultModelSelection.instanceId)
       ? settings.defaultModelSelection
       : null;
-  const model =
-    selection ?? configured ?? newGameFallback(entries, providers, settings, lastGameModel);
+  const model = selection ?? configured ?? newGameFallback(entries, providers, lastGameModel);
   const modelEntry = entries.find((entry) => entry.instanceId === model.instanceId);
   return {
     entries,

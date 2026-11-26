@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   complete: vi.fn<() => Promise<void>>(),
   refresh: vi.fn(),
   toast: vi.fn(),
+  agentStatus: "ready" as "ready" | "error",
 }));
 vi.mock("../../state/session", () => ({
   useEnvironmentScope: () => true,
@@ -26,6 +27,22 @@ vi.mock("../../state/environments", () => {
   return {
     useEnvironments: () => ({ environments: [environment] }),
     usePrimaryEnvironment: () => environment,
+    useEnvironmentProviders: () =>
+      new Map([
+        [
+          "test-env",
+          [
+            {
+              instanceId: "claudeAgent",
+              driver: "claudeAgent",
+              enabled: true,
+              installed: mocks.agentStatus === "ready",
+              status: mocks.agentStatus,
+              models: [],
+            },
+          ],
+        ],
+      ]),
   };
 });
 vi.mock("../../state/server", () => ({
@@ -57,6 +74,7 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.agentStatus = "ready";
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -151,5 +169,16 @@ it("saves completion once and waits for it before leaving setup", async () => {
   expect(onDone).not.toHaveBeenCalled();
   expect(button("Finishing setup…").disabled).toBe(true);
   await act(async () => resolveCompletion());
+  expect(onDone).toHaveBeenCalledOnce();
+});
+
+it("needs a ready agent to start making games, and says how to look around without one", async () => {
+  mocks.agentStatus = "error";
+  const onDone = vi.fn();
+  await act(async () => root.render(<WelcomeWizard onDone={onDone} />));
+  expect(button("Start making games").disabled).toBe(true);
+  expect(document.body.textContent).toContain("Games need a ready agent");
+  await click("Look around first");
+  expect(mocks.complete).toHaveBeenCalledOnce();
   expect(onDone).toHaveBeenCalledOnce();
 });
