@@ -87,7 +87,10 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
                 ? "Signed in. Update it in Settings → Providers for full support."
                 : props.provider?.installed
                   ? existingSummary.headline
-                  : "Code with your ChatGPT subscription."
+                  : existingState === "install"
+                    ? // Continue with ChatGPT installs a Codex of Kurambit's own.
+                      "Not found · Continue with ChatGPT installs it for you."
+                    : "Code with your ChatGPT subscription."
         }
         control={
           existingReady ? (
