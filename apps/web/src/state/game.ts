@@ -33,10 +33,24 @@ const gameEvents = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRunt
   // Game operations are minutes apart; keep the stream warm while a game
   // surface is open without holding it for the life of the app.
   idleTtlMs: 5 * 60_000,
-  // A stream atom holds only the last value of each chunk, and a run's end
-  // arrives as one chunk ("builds" then "run"): each value is the whole batch,
-  // so no push is hidden behind the one after it.
-  transform: Stream.chunks,
+  // A stream atom holds only its last value, and a signal nobody reads (its chat is in the
+  // background) reads only that value when it is read again: a run push followed by a builds
+  // push was never seen, and the Keep going banner kept saying step 1. Each value is the whole
+  // batch after the newest earlier push of every game and scope, so none hides behind another.
+  transform: Stream.mapAccumArray(
+    () => new Map<string, GameOperationEvent>(),
+    (newest, batch) => {
+      const value = [...newest.values(), ...batch];
+      const next = new Map(newest);
+      for (const event of batch) {
+        // Oldest first, as pushes came: a reader's newest is the last it finds.
+        const key = `${event.root}\0${gameEventScope(event)}`;
+        next.delete(key);
+        next.set(key, event);
+      }
+      return [next, [value]];
+    },
+  ),
 });
 
 /** The newest event of the latest batch whose scope is wanted, or undefined. */
@@ -227,8 +241,10 @@ const gameListSignal = Atom.family((environmentId: string) => {
         event.name === "run"
           ? `run\0${event.state}\0${event.message}`
           : `${event.name}\0${event.state}`;
-      if (states.get(event.root) !== state) {
-        states.set(event.root, state);
+      // Per game and scope: each value restates the newest of both, which changes nothing.
+      const key = `${event.root}\0${scope}`;
+      if (states.get(key) !== state) {
+        states.set(key, state);
         changes += 1;
       }
     }
