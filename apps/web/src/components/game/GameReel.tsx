@@ -98,7 +98,10 @@ export function GameReel({
   );
 }
 
-/** A build's picture: the last frame of its measured random-input (or idle) play. */
+/**
+ * A build's picture: a frame of its measured play, else the still its strip card shows. Without
+ * either it says whether one may still come (its measure is queued or running) or never will.
+ */
 function StepFrame({
   threadRef,
   root,
@@ -121,16 +124,19 @@ function StepFrame({
         }),
   ).data;
   const frame =
-    facts === null || facts === undefined
+    (facts === null || facts === undefined
       ? null
       : (gameFactsView(facts)
           .flatMap((view) => view.evidence)
-          .find((item) => item.kind === "frame")?.path ?? null);
+          .find((item) => item.kind === "frame")?.path ?? null)) ??
+    build?.still ??
+    null;
+  const coming = build?.facts.state === "queued" || build?.facts.state === "measuring";
   return (
     <figure className="flex min-w-0 flex-col gap-0.5">
       {frame === null ? (
         <span className="flex aspect-video items-center justify-center rounded-md bg-muted/60 text-micro text-muted-foreground">
-          {build === null ? "—" : "No frame yet"}
+          {build === null ? "—" : coming ? "No frame yet" : "No frame was made"}
         </span>
       ) : (
         <GameImage
