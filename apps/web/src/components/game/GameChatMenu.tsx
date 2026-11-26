@@ -13,7 +13,6 @@ import {
   Trash2Icon,
   Undo2Icon,
 } from "lucide-react";
-import { useState } from "react";
 
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -28,7 +27,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } f
 import { Text } from "../ui/text";
 import { toastManager } from "../ui/toast";
 import { chatTitle } from "./gameLibrary.logic";
-import { GameNameInput, useThreadGameName } from "./GameName";
+import { GameNameInput, useRenameFromMenu, useThreadGameName } from "./GameName";
 
 /**
  * Which chat of the game is on screen, after the game's name: its title, and in its menu what can
@@ -43,7 +42,7 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
   const rename = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
-  const [renaming, setRenaming] = useState(false);
+  const renameFromMenu = useRenameFromMenu();
   if (shell === null) return null;
   const title = chatTitle(shell, gameName);
   const settled = shell.settledOverride === "settled";
@@ -61,7 +60,7 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
   return (
     <>
       <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-dim-foreground" />
-      {renaming ? (
+      {renameFromMenu.renaming ? (
         <GameNameInput
           name={title}
           onRename={(title) =>
@@ -70,11 +69,11 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
               input: { threadId: threadRef.threadId, title },
             }).then(said("Could not rename the chat"))
           }
-          onDone={() => setRenaming(false)}
+          onDone={renameFromMenu.done}
           className="me-1 w-56"
         />
       ) : (
-        <Menu>
+        <Menu onOpenChangeComplete={renameFromMenu.onMenuSettled}>
           <MenuTrigger
             render={
               // The chat is the second crumb: quieter than its game until the pointer is on it.
@@ -93,7 +92,7 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
             <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
           </MenuTrigger>
           <MenuPopup align="start">
-            <MenuItem disabled={!canOperate} onClick={() => setRenaming(true)}>
+            <MenuItem disabled={!canOperate} onClick={renameFromMenu.ask}>
               <PencilIcon />
               Rename chat
             </MenuItem>

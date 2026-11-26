@@ -4,12 +4,13 @@ import {
   squashAtomCommandFailure,
 } from "@kurambit/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectId, ScopedThreadRef } from "@kurambit/contracts";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { create } from "zustand";
 
 import { useProject, useQuietThreadShell } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { isReturningFocus } from "../ui/focus-return";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 import { useGameLibraryRefresh } from "./useGameLibrary";
@@ -63,6 +64,31 @@ export function useRenameGame(environmentId: EnvironmentId) {
   };
 }
 
+/**
+ * Renaming from a menu whose trigger the name field takes the place of: the field comes once the
+ * menu has closed. Taken away mid-close, the menu hands focus back after the field took it, which
+ * blurs the field and ends the rename before a key is typed. Home's card keeps its menu, so it
+ * starts the rename at once.
+ */
+export function useRenameFromMenu() {
+  const [renaming, setRenaming] = useState(false);
+  const asked = useRef(false);
+  return {
+    renaming,
+    /** The menu item's press: the rename starts as the menu finishes closing. */
+    ask: () => {
+      asked.current = true;
+    },
+    /** The menu's onOpenChangeComplete. */
+    onMenuSettled: (open: boolean) => {
+      if (open || !asked.current) return;
+      asked.current = false;
+      setRenaming(true);
+    },
+    done: () => setRenaming(false),
+  };
+}
+
 /** The name as an input: Enter or leaving it keeps the new name, Escape keeps the old one. */
 export function GameNameInput(props: {
   name: string;
@@ -95,7 +121,15 @@ export function GameNameInput(props: {
         if (event.key === "Enter") finish(true);
         if (event.key === "Escape") finish(false);
       }}
-      onBlur={() => finish(true)}
+      onBlur={(event) => {
+        // A popup closing hands focus back to where it was: that is not the person leaving.
+        if (isReturningFocus(document)) {
+          const field = event.currentTarget;
+          requestAnimationFrame(() => field.focus());
+          return;
+        }
+        finish(true);
+      }}
       className={props.className}
     />
   );

@@ -99,7 +99,7 @@ import { GameCopyActions, GameCopyLabel } from "./GameCopyHeader";
 import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHistory";
 import { GameExports } from "./GameExports";
 import { GameChatMenu } from "./GameChatMenu";
-import { GameNameInput, useGameName, useRenameGame } from "./GameName";
+import { GameNameInput, useGameName, useRenameFromMenu, useRenameGame } from "./GameName";
 import { useGameActions } from "./useGameActions";
 import { GameStageOverlay } from "./GameStageOverlay";
 import { CODE_MODEL_PREFIX } from "./gameArt.logic";
@@ -739,7 +739,8 @@ function ThreadGameStage({
     data?.manifest.name ?? "",
   );
   const renameGame = useRenameGame(threadRef.environmentId);
-  const [renamingGame, setRenamingGame] = useState(false);
+  const renameGameFromMenu = useRenameFromMenu();
+  const renamingGame = renameGameFromMenu.renaming;
   // The game as a whole, for what its menu does to it: a new chat, archive, delete.
   const gameActions = useGameActions();
   const game =
@@ -1450,11 +1451,11 @@ function ThreadGameStage({
             <GameNameInput
               name={gameName}
               onRename={(name) => void renameGame(quietShell.projectId, name)}
-              onDone={() => setRenamingGame(false)}
+              onDone={renameGameFromMenu.done}
               className="-ms-2.5 me-1 w-56"
             />
           ) : (
-            <Menu>
+            <Menu onOpenChangeComplete={renameGameFromMenu.onMenuSettled}>
               <MenuTrigger
                 render={
                   <Button
@@ -1501,7 +1502,7 @@ function ThreadGameStage({
                     <MenuSeparator />
                   </>
                 )}
-                <MenuItem disabled={quietShell === null} onClick={() => setRenamingGame(true)}>
+                <MenuItem disabled={quietShell === null} onClick={renameGameFromMenu.ask}>
                   <PencilIcon />
                   Rename
                 </MenuItem>
