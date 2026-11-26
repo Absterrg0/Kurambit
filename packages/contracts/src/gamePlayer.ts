@@ -109,6 +109,7 @@ const gamePlayerReadings = (
       : opened.inputs === 0
         ? "Space in play"
         : `${opened.by} starts play`;
+  const opensInPlay = !("notMeasured" in opened) && opened.started && opened.inputs === 0;
   return [
     line(
       "load",
@@ -122,7 +123,8 @@ const gamePlayerReadings = (
       "moves",
       "opening moves",
       (v) => (v ? "yes" : "no, the first frame is still a second later"),
-      (v) => v,
+      // A game that opens in play and waits for the first press (a puzzle) is still by design.
+      (v) => v || (opensInPlay ? null : false),
       () => "Opens on a still frame",
     ),
     line(
