@@ -279,17 +279,34 @@ const check = (store: CheckpointStore["Service"], final: boolean, fresh = false)
         ? { ...measured, fresh: "Fresh eyes need a frame, and this check made none." }
         : measured;
     const reference = yield* gameReference(root);
+    // As an act's frame, the small JPEG beside the view; the full PNG when it is stacked on the
+    // reference, which needs both at one size.
+    const width = Math.min(SMALL_FRAME_WIDTH, THREE_VIEWPORT.width);
+    const small = {
+      width,
+      height: Math.round((THREE_VIEWPORT.height * width) / THREE_VIEWPORT.width),
+    };
     const screenshots = yield* Effect.promise(() =>
       Promise.all(
-        views.map((view) =>
-          NodeFSP.readFile(NodePath.join(root, view.path)).then(
-            (bytes) =>
-              (view.entry === "gameplay" && reference !== null
-                ? besideReference(bytes, reference)
-                : null) ?? png(bytes),
-            () => null,
-          ),
-        ),
+        views.map((view) => {
+          const path = NodePath.join(root, view.path);
+          const stacked = view.entry === "gameplay" ? reference : null;
+          const full = () =>
+            NodeFSP.readFile(path).then(
+              (bytes) => (stacked === null ? null : besideReference(bytes, stacked)) ?? png(bytes),
+              () => null,
+            );
+          return stacked !== null
+            ? full()
+            : NodeFSP.readFile(smallFramePath(path)).then(
+                (bytes) => ({
+                  mimeType: "image/jpeg" as const,
+                  data: bytes.toString("base64"),
+                  ...small,
+                }),
+                full,
+              );
+        }),
       ),
     );
     const shown = screenshots.filter((shot) => shot !== null);
