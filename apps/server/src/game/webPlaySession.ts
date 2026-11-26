@@ -1313,10 +1313,12 @@ export const openWebPlaySession = async (input: {
       keptStorage: () => kept,
       perf: () => perf,
       loadedBytes: () => loaded,
+      // Read just after play, it waits for the frame being drawn: at 2560×1080 in software a 3D
+      // game's frame took over the input bound, which read as "stopped answering" at that size.
       screen: async () => {
         const read = await bounded(
           page.evaluate(READ_SCREEN).catch(() => null),
-          PLAY_BOUNDS.webCallMs,
+          PLAY_BOUNDS.stillMs,
         );
         return read === TIMED_OUT ? null : read;
       },
