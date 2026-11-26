@@ -546,6 +546,16 @@ export const make = Effect.fn("resourceTelemetry.desktopTelemetryReceiver.make")
           lastError: Option.some(new DesktopTelemetryStreamClosed({ fd }).message),
         })),
       ),
+      // The desktop holds this pipe open until this server exits, so it ends
+      // only when the desktop died without stopping us (a crash, SIGKILL, or a
+      // logout that took its display). This server runs in its own session, so
+      // nothing else would stop it or the agents it started. Run the same
+      // shutdown the desktop's SIGTERM would.
+      Effect.andThen(
+        Effect.logWarning("The desktop app is gone; stopping the server").pipe(
+          Effect.andThen(Effect.sync(() => process.emit("SIGTERM", "SIGTERM"))),
+        ),
+      ),
       Effect.catch((error) =>
         updateHealth((current): DesktopTelemetryReceiverHealth => ({
           ...current,
