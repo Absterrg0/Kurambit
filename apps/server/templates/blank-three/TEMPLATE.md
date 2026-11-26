@@ -19,8 +19,9 @@ a running stand-in, so the Stage shows a frame at once. This is all the bridge n
    in play (from a title, or as a retry), `menu()` a fresh run on the title, `pause()` and
    `resume()` hold play. The harness's plays open in play, where `title()` does nothing.
 4. **Controls through `ctx.input`.** `ctx.input.down(name)`, `pressed(name)` and `vector()` (the
-   arrows and WASD) read named actions, and `export const ACTIONS` names the game's own, such as
-   `{ dash: { keys: ["ShiftLeft"], pad: ["rb"], mouse: [0] } }`. The Stage's Controls rebinds
+   arrows and WASD: `move_left`/`right`/`up`/`down`) read named actions, and `export const ACTIONS`
+   names the game's own, such as `{ dash: { keys: ["ShiftLeft"], pad: ["rb"], mouse: [0] } }`. The
+   Stage's Controls rebinds
    them, the QA play presses each one the game reads, and replays record them. Timers go through
    `ctx.after(seconds, fn)` and chance through `ctx.random()`, so a replay plays the same.
    Runs saved as test plays (`.studio/plays/`) replay on every build, ending as they did.
