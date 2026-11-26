@@ -77,7 +77,7 @@ export const GameQaReport = Schema.Struct({
 export type GameQaReport = typeof GameQaReport.Type;
 
 /** PURE. Where the play looked for a control being read: "in play, on the title or at the end". */
-export const gameQaWhere = (report: GameQaReport): string => {
+const gameQaWhere = (report: GameQaReport): string => {
   const visited = report.visited ?? ["title"];
   const places = [
     "in play",
