@@ -77,3 +77,47 @@ it.effect("an equal never interrupts the holder, and a raised waiter goes before
     expect(log).toEqual(["A start", "A end", "C", "B"]);
   }),
 );
+
+it.effect("a wider lane holds plays side by side, and a full one stops its least urgent", () =>
+  Effect.gen(function* () {
+    const lane = makePlayLane();
+    yield* lane.setWidth(2);
+    const log: Array<string> = [];
+    const holding = (name: string, started: Deferred.Deferred<void>) => {
+      let attempts = 0;
+      return Effect.gen(function* () {
+        attempts += 1;
+        log.push(`${name} ${attempts}`);
+        if (attempts > 1) return;
+        yield* Deferred.succeed(started, undefined);
+        return yield* Effect.never.pipe(
+          Effect.onInterrupt(() => Effect.sync(() => log.push(`${name} gave way`))),
+        );
+      });
+    };
+    const turnStarted = yield* Deferred.make<void>();
+    const backgroundStarted = yield* Deferred.make<void>();
+    const turn = yield* Effect.forkChild(lane.hold("turn", holding("turn", turnStarted)));
+    yield* Deferred.await(turnStarted);
+    const background = yield* Effect.forkChild(
+      lane.hold("background", holding("background", backgroundStarted)),
+    );
+    // Both hold at once: the second never waited for the first.
+    yield* Deferred.await(backgroundStarted);
+    yield* lane.hold(
+      "agent",
+      Effect.sync(() => log.push("check")),
+    );
+    yield* Fiber.interrupt(turn);
+    yield* Fiber.join(background);
+    expect(log).toEqual([
+      "turn 1",
+      "background 1",
+      "background gave way",
+      "check",
+      // Ended by the test: the turn play never gave way to the check.
+      "turn gave way",
+      "background 2",
+    ]);
+  }),
+);

@@ -1,11 +1,15 @@
-// One lane for every headless play this server draws (a build's measure, game_check), so no
-// two of them share the GPU and every timing a play reads is its own. A build's no-input and
-// random-input lanes (GameFacts) are one hold: their sharing is deliberate and re-checked.
+// One lane for every headless play this server draws (a build's measure, game_check). On a GPU
+// it is one play wide, so no two of them share the GPU and every timing a play reads is its
+// own. When the browser draws in software no frame time is read at all (playPerf.ts), so that
+// isolation buys nothing there: the lane is as wide as the cores allow (setWidth). A build's
+// no-input and random-input lanes (GameFacts) are one hold: their sharing is deliberate and
+// re-checked.
 //
-// Holds are granted by who waits on them, then first asked. A holder that a more urgent waiter
-// outranks is interrupted and its work is run again from the start once the lane is its turn
-// again, so a measure's half-played tier is never stored: GameFacts plans again from its row.
-// Nothing ranks above an agent's check, so its play is never interrupted and never runs twice.
+// Holds are granted by who waits on them, then first asked. With the lane full, the least
+// urgent holder that a waiter outranks is interrupted and its work is run again from the start
+// once the lane is its turn again, so a measure's half-played tier is never stored: GameFacts
+// plans again from its row. Nothing ranks above an agent's check, so its play is never
+// interrupted and never runs twice.
 //
 // Built on Effect's transactional refs: a waiter's turn and a holder's being outranked are each
 // one transaction that retries until true, so no wake-up is ever lost between a check and a wait.
@@ -33,13 +37,15 @@ class Holding extends Context.Reference<boolean>("kurambit/game/playLane/Holding
 }) {}
 
 interface LaneState {
-  readonly holder: LaneTicket | null;
+  readonly holders: ReadonlyArray<LaneTicket>;
   readonly waiting: ReadonlyArray<LaneTicket>;
 }
 
 export const makePlayLane = () => {
   let next = 0;
-  const state = TxRef.makeUnsafe<LaneState>({ holder: null, waiting: [] });
+  const state = TxRef.makeUnsafe<LaneState>({ holders: [], waiting: [] });
+  /** How many plays hold the lane at once. */
+  const width = TxRef.makeUnsafe(1);
 
   const ticket = (priority: PlayPriority): LaneTicket => ({
     seq: next++,
@@ -63,6 +69,21 @@ export const makePlayLane = () => {
       }
       return best;
     });
+  /** The holder that gives way first: the least urgent, then the last asked. */
+  const last = (holders: ReadonlyArray<LaneTicket>) =>
+    Effect.gen(function* () {
+      let worst: { readonly asker: LaneTicket; readonly rank: number } | null = null;
+      for (const asker of holders) {
+        const rank = yield* TxRef.get(asker.rank);
+        if (
+          worst === null ||
+          rank > worst.rank ||
+          (rank === worst.rank && asker.seq > worst.asker.seq)
+        )
+          worst = { asker, rank };
+      }
+      return worst;
+    });
 
   const enter = (asker: LaneTicket) =>
     Effect.tx(TxRef.update(state, (s) => ({ ...s, waiting: [...s.waiting, asker] })));
@@ -70,10 +91,13 @@ export const makePlayLane = () => {
     Effect.tx(
       Effect.gen(function* () {
         const s = yield* TxRef.get(state);
-        if (s.holder !== null || (yield* first(s.waiting))?.asker !== asker)
+        if (
+          s.holders.length >= (yield* TxRef.get(width)) ||
+          (yield* first(s.waiting))?.asker !== asker
+        )
           return yield* Effect.txRetry;
         yield* TxRef.set(state, {
-          holder: asker,
+          holders: [...s.holders, asker],
           waiting: s.waiting.filter((each) => each !== asker),
         });
       }),
@@ -81,19 +105,28 @@ export const makePlayLane = () => {
   const leave = (asker: LaneTicket) =>
     Effect.tx(
       TxRef.update(state, (s) => ({
-        holder: s.holder === asker ? null : s.holder,
+        holders: s.holders.filter((each) => each !== asker),
         waiting: s.waiting.filter((each) => each !== asker),
       })),
     );
-  /** Ends once a waiter outranks the holder. */
+  /** Ends once the lane is full and a waiter outranks this holder, the one that gives way first. */
   const outranked = (holder: LaneTicket) =>
     Effect.tx(
       Effect.gen(function* () {
-        const mine = yield* TxRef.get(holder.rank);
-        const head = yield* first((yield* TxRef.get(state)).waiting);
-        if (head === null || head.rank >= mine) return yield* Effect.txRetry;
+        const s = yield* TxRef.get(state);
+        const head = yield* first(s.waiting);
+        const yielding = yield* last(s.holders);
+        if (
+          head === null ||
+          s.holders.length < (yield* TxRef.get(width)) ||
+          yielding?.asker !== holder ||
+          head.rank >= yielding.rank
+        )
+          return yield* Effect.txRetry;
       }),
     );
+  /** How many plays may hold the lane at once, at least one. */
+  const setWidth = (plays: number) => Effect.tx(TxRef.set(width, Math.max(1, Math.floor(plays))));
 
   /** One hold: the work's exit, or null when it gave way and must run again. */
   const holdOnce = <A, E, R>(asker: LaneTicket, work: Effect.Effect<A, E, R>) =>
@@ -121,7 +154,7 @@ export const makePlayLane = () => {
     );
 
   /**
-   * Runs `work` alone in the lane, as `asker` (a ticket kept across its turns, or a priority
+   * Runs `work` in the lane, as `asker` (a ticket kept across its turns, or a priority
    * for a one-off). Inside another hold it runs at once: the outer hold is its turn.
    */
   const hold = <A, E, R>(
@@ -149,7 +182,7 @@ export const makePlayLane = () => {
           (each.rank.value === asker.rank.value && each.seq < asker.seq)),
     ).length;
 
-  return { ticket, raise, lower, hold, ahead };
+  return { ticket, raise, lower, hold, ahead, setWidth };
 };
 
 /** The server's one lane. */

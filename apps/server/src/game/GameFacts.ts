@@ -3,10 +3,11 @@
 // copy of the build (GameBuildCopies), never in the game folder, and kept in
 // one table. Nothing that matters lives only in memory: a measure writes the
 // build's row first (owed), each tier is written as it lands, and a reconcile
-// at startup measures every row with tiers still owed. In memory is only the
+// at startup measures each game's current build whose row still owes a tier
+// (GameBuilds.reconcile). In memory is only the
 // keyed jobs, one per key, that Stop game clears for its game. A job runs in
 // the server's one play lane (playLane.ts) at the priority of who asked: one
-// measurement at a time, the most urgent first, and one outranked gives way
+// measurement at a time on a GPU, the most urgent first, and one outranked gives way
 // mid-tier and plans again from its row (every bot start still passes the
 // memory gate). A tool or machine fault is stored as "not
 // measured": with `retry` when waiting may clear it (every measure tries
@@ -836,10 +837,12 @@ const make = Effect.gen(function* () {
 
         // Each bot run says how busy the machine was, so a run slowed by other
         // work is never read as the game's slowness; it waits a while for an
-        // idle machine first and holds the copy's one engine step.
+        // idle machine first and holds the copy's one engine step. In software
+        // no frame time is read and the lane runs plays side by side, so the
+        // machine is busy with our own plays: waiting for calm would only wait.
         const runBot = (file: string, seconds: number, options?: { readonly realTime: boolean }) =>
           Effect.andThen(
-            idleMachine,
+            software ? Effect.void : idleMachine,
             withMachine(step(bots.runIn(copy, { file, seconds }, options))).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
             ),

@@ -1,13 +1,16 @@
+// @effect-diagnostics nodeBuiltinImport:off -- The play lane's width follows the machine's cores, which only node:os reports.
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as NodeOS from "node:os";
 import { GameOperationError } from "@kurambit/contracts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import { engineChildEnv } from "./GameProcesses.ts";
 import { RUNTIME_ROUTE } from "./gameRuntime.ts";
+import { playLane } from "./playLane.ts";
 
 /**
  * A clean room for Chromium and its children: the allowlisted engine base
@@ -260,6 +263,11 @@ export const makeGameBrowser = Effect.gen(function* () {
                     probe: `the probe itself failed (${String(Cause.squash(cause)).slice(0, 120)})`,
                   }),
                 ),
+              ),
+              // In software no frame time is read, so plays share the cores: each SwiftShader
+              // page draws on several threads, so a quarter of them per play. On a GPU, one.
+              Effect.tap((chosen) =>
+                playLane.setWidth(chosen.software ? NodeOS.availableParallelism() / 4 : 1),
               ),
             ),
           );
