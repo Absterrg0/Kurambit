@@ -21,6 +21,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { gameToolName, GameToolLink } from "../game/GameToolLink";
 import { Button, InlineButton } from "../ui/button";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { isElectron } from "../../env";
+import { readLocalApi } from "../../localApi";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
 import { SettingsKeyRow } from "./SettingsKeyRow";
@@ -53,7 +55,8 @@ const toolAbout = (tool: GameToolStatus): string =>
   tool.addon !== undefined
     ? `${tool.addon.name} ${tool.addon.version}. ${tool.addon.licence}. Downloaded from ${tool.addon.source} (${megabytes(tool.addon.bytes)}) into Kurambit's own Blender sessions, never your Blender settings. ${tool.addon.asksFirst ? "The agent asks you before it adds it." : "The agent adds it when a game first needs it."} ${tool.addon.without}`
     : {
-        blender: "Blender 4.2 or later.",
+        blender:
+          "Use Blender 5.3, the version Kurambit's Blender tools are made for. Any version from 4.2 on runs.",
         uv: "Kurambit fetches it itself when it is not installed.",
         addon: "",
         ffmpeg:
@@ -80,9 +83,6 @@ const STATUS_LABELS = {
   error: { tone: "danger", label: "Not ready" },
 } as const;
 
-const PATH_ROWS = [{ key: "gameBlenderPath", title: "Blender executable" }] as const;
-type PathKey = (typeof PATH_ROWS)[number]["key"];
-
 /** Settings → Game tools, for the one computer the settings are scoped to. */
 export function GameToolsSettingsPanel() {
   const { environment, scope } = useSettingsScope();
@@ -107,19 +107,7 @@ export function GameToolsSettingsPanel() {
 }
 
 function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) {
-  const settings = useEnvironmentSettings(environmentId);
   const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
-  const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
-  const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
-  const [error, setError] = useState<string | null>(null);
-  // Each field saves itself when it is left, like every other settings field; a path
-  // changes which tool is found, so the rows above are checked again after it.
-  const savePath = async (key: PathKey, value: string) => {
-    setError(null);
-    const saved = await update({ environmentId, input: { patch: { [key]: value } } });
-    if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
-    query.refresh();
-  };
   return (
     <SettingsSection
       id="game-tools"
@@ -154,38 +142,74 @@ function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) 
           </Text>
         </div>
       ) : null}
-      {PATH_ROWS.map((row) => (
-        <SettingsRow
-          key={row.key}
-          icon={<FolderIcon />}
-          title={row.title}
-          description="Leave blank to find it automatically."
-          control={
-            <DraftInput
-              size="sm"
-              className="w-full sm:w-72"
-              aria-label={row.title}
-              value={settings[row.key]}
-              disabled={!canWrite}
-              spellCheck={false}
-              onCommit={(next) => void savePath(row.key, next.trim())}
-              placeholder="Automatic"
-            />
-          }
-        />
-      ))}
-      {error ? (
-        <div className="px-4 py-3">
-          <Text
-            variant="body"
-            tone="destructive"
-            render={<p role="alert" className="whitespace-pre-wrap" />}
-          >
-            {error}
-          </Text>
-        </div>
-      ) : null}
+      <SettingsRow
+        icon={<FolderIcon />}
+        title="Blender executable"
+        description="Leave blank to find it automatically."
+        control={
+          // A path changes which Blender is found, so the rows above are checked again after it.
+          <BlenderPathField environmentId={environmentId} onSaved={() => query.refresh()} />
+        }
+      />
     </SettingsSection>
+  );
+}
+
+/**
+ * The Blender executable setting, saved when the field is left like every other settings
+ * field. On desktop it can also be chosen as a folder: detection looks inside the folder a
+ * download unpacked to. Settings and first run both use it.
+ */
+export function BlenderPathField({
+  environmentId,
+  onSaved,
+}: {
+  environmentId: EnvironmentId;
+  onSaved: () => void;
+}) {
+  const settings = useEnvironmentSettings(environmentId);
+  const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
+  const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
+  const [error, setError] = useState<string | null>(null);
+  const save = async (value: string) => {
+    setError(null);
+    const saved = await update({ environmentId, input: { patch: { gameBlenderPath: value } } });
+    if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
+    onSaved();
+  };
+  const choose = async () => {
+    const picked = await readLocalApi()?.dialogs.pickFolder();
+    if (picked) await save(picked);
+  };
+  return (
+    <div className="flex w-full flex-col gap-1 sm:w-auto">
+      <div className="flex items-center gap-2">
+        <DraftInput
+          size="sm"
+          className="w-full sm:w-72"
+          aria-label="Blender executable"
+          value={settings.gameBlenderPath}
+          disabled={!canWrite}
+          spellCheck={false}
+          onCommit={(next) => void save(next.trim())}
+          placeholder="Automatic"
+        />
+        {isElectron ? (
+          <Button size="sm" variant="outline" disabled={!canWrite} onClick={() => void choose()}>
+            Choose folder…
+          </Button>
+        ) : null}
+      </div>
+      {error ? (
+        <Text
+          variant="meta"
+          tone="destructive"
+          render={<p role="alert" className="whitespace-pre-wrap" />}
+        >
+          {error}
+        </Text>
+      ) : null}
+    </div>
   );
 }
 

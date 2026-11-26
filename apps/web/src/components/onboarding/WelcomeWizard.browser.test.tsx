@@ -57,6 +57,29 @@ vi.mock("@effect/atom-react", async (importOriginal) => ({
   useAtomValue: (value: unknown) => value,
 }));
 vi.mock("../../state/terminal", () => ({ terminalEnvironment: {} }));
+vi.mock("../../state/game", () => ({ gameEnvironment: { toolchain: () => null } }));
+// No Blender here: it is optional, so every test below also finishes without it.
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({
+    data: {
+      tools: [
+        {
+          tool: "blender",
+          installed: false,
+          path: null,
+          version: null,
+          source: null,
+          status: "error",
+          message: "Blender was not found.",
+          downloadUrl: "https://www.blender.org/download/",
+        },
+      ],
+    },
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));
+vi.mock("../settings/GameToolsSettings", () => ({ BlenderPathField: () => null }));
 vi.mock("../ThreadTerminalDrawer", () => ({ TerminalViewport: () => null }));
 vi.mock("../settings/ChatGptWelcomeCoordinator", () => ({ ChatGptWelcomeCoordinator: () => null }));
 vi.mock("../settings/CodexSetupSection", () => ({
@@ -116,6 +139,7 @@ it("opens on Agents and finishes, without offering coding-project imports", asyn
   await act(async () => root.render(<WelcomeWizard onDone={onDone} />));
   expect(document.body.textContent).not.toContain("Projects");
   expect(document.body.textContent).toContain("Sign in to the agents that build your games");
+  expect(document.body.textContent).toContain("Optional: makes game art");
   await click("Start making games");
   expect(mocks.complete).toHaveBeenCalledOnce();
   expect(onDone).toHaveBeenCalledExactlyOnceWith();

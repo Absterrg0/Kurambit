@@ -15,7 +15,7 @@ import {
   ThreadId,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
-import { ArrowRightIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ArrowRightIcon, BoxIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
@@ -53,6 +53,10 @@ import { SettingsGroup } from "../settings/SettingsGroup";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
 import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.logic";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
+import { BlenderPathField } from "../settings/GameToolsSettings";
+import { GameToolLink } from "../game/GameToolLink";
+import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuery } from "../../state/query";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 
 import { Button } from "../ui/button";
@@ -202,7 +206,7 @@ function AgentsStep({
   return (
     <StepShell
       title="Connect your agents"
-      description="Sign in to the agents that build your games; you pick one for each new game. Agents already installed here are listed; add another, such as Cursor, in Settings → Providers."
+      description="Sign in to the agents that build your games; you pick one for each new game. Agents already installed here are listed; add another, such as Cursor, in Settings → Providers. Blender, for game art, is optional."
     >
       {/* The list gets what the dialog's header, title and button leave, so the
           button stays on screen on short windows. */}
@@ -397,6 +401,9 @@ function ConnectedAgentsStep({
           </div>
         ) : null}
       </SettingsGroup>
+      <SettingsGroup className="mt-3">
+        <BlenderRow environmentId={environmentId} />
+      </SettingsGroup>
       {addingAccount ? (
         <AddManagedCodexAccountDialog
           environmentId={environmentId}
@@ -571,6 +578,47 @@ function AgentCard({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Blender makes game art; games start without it. The same detection and executable setting as
+ * Settings → Game tools: found, or the way to point at it or download it.
+ */
+function BlenderRow({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
+  const blender = query.data?.tools.find((tool) => tool.tool === "blender") ?? null;
+  const ready = blender?.status === "ready";
+  return (
+    <div className="flex flex-col gap-2 px-4 py-2">
+      <div className="flex min-h-10 items-center gap-3">
+        <BoxIcon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-foreground">Blender</span>
+          <p className="mt-0.5 text-meta font-normal break-words whitespace-pre-wrap text-muted-foreground">
+            {blender === null
+              ? query.error === null
+                ? "Checking…"
+                : "Could not check for Blender. Check again later in Settings → Game tools."
+              : ready
+                ? ["Makes game art", blender.version].filter(Boolean).join(" · ")
+                : blender.installed
+                  ? blender.message
+                  : "Optional: makes game art. Games start without it."}
+          </p>
+        </div>
+        <div className="shrink-0">
+          {ready ? (
+            <StatusLabel tone="success">Ready</StatusLabel>
+          ) : blender === null ? null : (
+            <GameToolLink tool={blender} />
+          )}
+        </div>
+      </div>
+      {blender === null || ready ? null : (
+        <BlenderPathField environmentId={environmentId} onSaved={() => query.refresh()} />
+      )}
     </div>
   );
 }

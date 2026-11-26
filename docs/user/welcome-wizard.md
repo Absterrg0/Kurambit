@@ -12,4 +12,6 @@ If setup cannot confirm the workspace during startup, select **Reload** to try a
 
 Connect the agent that will build your games. Setup always checks for Codex and Claude, and on a new installation it also turns on OpenCode, Grok, Pi or Muse when their command-line tool is already installed. If Codex or Claude needs installation or sign-in, use its setup action; fix any other agent in **Settings > Providers**, where you can also add agents later. An agent you turn off stays off.
 
+Blender, for game art, is optional and games start without it. Setup shows whether it found Blender; if not, point it at your copy (on desktop, **Choose folder…** takes the folder the download unpacked to) or get it from blender.org. **Settings > Game tools** holds the same setting.
+
 Select **Start making games** once an agent is ready to finish setup and open the Games home. Use **New game** to describe a game for your agent, or **Open game** to select an existing game folder containing `game.json`. To look around before connecting an agent, select **Look around first**; connect one later in **Settings > Providers**.
