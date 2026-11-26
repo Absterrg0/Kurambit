@@ -22,7 +22,7 @@ const tier = (ending: Ending, at: number | null = 20) => ({
   status: "measured" as const,
   value: { ending, at, played: 60, note: "", evidence: "builds/logs/x" },
 });
-const counted = { objects: 50, things: 5, listeners: 30, intervals: 0, framesPerSecond: 60 };
+const counted = { objects: 50, things: 5, listeners: 30, intervals: 0, loops: 1 };
 const qaReport = (dead: number) => ({
   version: 1 as const,
   controls: ["Jump", "Dash", "Shoot"].map((label, at) => ({

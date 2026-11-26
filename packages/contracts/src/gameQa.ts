@@ -32,8 +32,11 @@ export const GameQaCount = Schema.Struct({
   /** Listeners on window and document, which a run's ctx.listen never adds. */
   listeners: Count,
   intervals: Count,
-  /** Animation frames asked for in a second: one loop asks for about the display's rate. */
-  framesPerSecond: Count,
+  /**
+   * Animation frames asked for per frame drawn: the loops running, whatever the frame rate.
+   * Absent from shells that counted frames a second, which a lighter scene also raised.
+   */
+  loops: Schema.optionalKey(Count),
 });
 export type GameQaCount = typeof GameQaCount.Type;
 
@@ -90,8 +93,8 @@ const gameQaWhere = (report: GameQaReport): string => {
 /** Where Retry's counts read as state the game kept outside its run. */
 const OBJECTS_GROWTH = 1.5;
 const OBJECTS_MORE = 30;
-const FRAMES_GROWTH = 1.5;
-const FRAMES_MORE = 30;
+/** A whole extra loop, less a frame that ended inside the counted second. */
+const LOOPS_MORE = 0.8;
 
 export const listedNames = (names: ReadonlyArray<string>) =>
   names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
@@ -134,11 +137,13 @@ export const gameQaFindings = (report: GameQaReport) => {
         fix: "use ctx.after, or clear them in stop().",
       });
     if (
-      after.framesPerSecond >= before.framesPerSecond * FRAMES_GROWTH &&
-      after.framesPerSecond - before.framesPerSecond >= FRAMES_MORE
+      before.loops !== undefined &&
+      after.loops !== undefined &&
+      before.loops > 0 &&
+      after.loops - before.loops >= LOOPS_MORE
     )
       retry.push({
-        said: `A second animation loop runs after Retry (${before.framesPerSecond} → ${after.framesPerSecond} frames asked a second)`,
+        said: `Another animation loop runs after Retry (${before.loops} → ${after.loops} frames asked per frame drawn)`,
         fix: "the game speeds up each Retry. Move per-frame work into update().",
       });
   }
