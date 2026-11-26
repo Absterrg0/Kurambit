@@ -1436,9 +1436,11 @@ export const openWebPlaySession = async (input: {
           });
       },
       refusedStates: () => refused,
+      // A frame an agent is shown waits as an act's does, on the page's measured frame cost: a
+      // check's look on a slow software page lost both its frames to a bound made for 30 fps.
       still: async (path, withSmall = false) =>
         withSmall
-          ? keepShot(path)
+          ? measured().then(() => keepShot(path))
           : (await bounded(
               shoot().then(({ png }) =>
                 png === null
