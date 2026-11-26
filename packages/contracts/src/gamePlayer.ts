@@ -61,19 +61,29 @@ type Key = Exclude<keyof GamePlayerReport, "idleEnded">;
 const s = (seconds: number) => `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
 const percent = (share: number) => `${Math.round(share * 100)}%`;
 
-/** PURE. One line per reading, as the person and the agent read it: the value, then ✓ or ✗ against its line. */
-export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string> => {
+/**
+ * PURE. One line per reading, as the person and the agent read it: the value, then ✓ or ✗ against
+ * its line. A reading off its line also says, as a headline, what it trips.
+ */
+const gamePlayerReadings = (
+  report: GamePlayerReport,
+): ReadonlyArray<{ readonly line: string; readonly trips: string | null }> => {
   const line = <K extends Key>(
     key: K,
     label: string,
     said: (value: Exclude<GamePlayerReport[K], { readonly notMeasured: string }>) => string,
     ok: (value: Exclude<GamePlayerReport[K], { readonly notMeasured: string }>) => boolean | null,
+    trips: (value: Exclude<GamePlayerReport[K], { readonly notMeasured: string }>) => string = () =>
+      "",
   ) => {
     const value: unknown = report[key];
     if (typeof value === "object" && value !== null && "notMeasured" in value)
-      return `${label}: not measured (${String(value.notMeasured)})`;
+      return { line: `${label}: not measured (${String(value.notMeasured)})`, trips: null };
     const good = ok(value as never);
-    return `${label}: ${said(value as never)}${good === null ? "" : good ? " ✓" : " ✗"}`;
+    return {
+      line: `${label}: ${said(value as never)}${good === null ? "" : good ? " ✓" : " ✗"}`,
+      trips: good === false ? trips(value as never) : null,
+    };
   };
   return [
     line(
@@ -81,12 +91,14 @@ export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string>
       "load",
       (v) => `first frame drawn at ${s(v.ready)}`,
       (v) => v.ready <= 1,
+      (v) => `First frame takes ${s(v.ready)}`,
     ),
     line(
       "moves",
       "opening moves",
       (v) => (v ? "yes" : "no, the first frame is still"),
       (v) => v,
+      () => "Opens on a still frame",
     ),
     line(
       "cover",
@@ -103,24 +115,33 @@ export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string>
           ? `${v.inputs} input${v.inputs === 1 ? "" : "s"}, ${s(v.seconds)} (${v.by})`
           : `${v.by} (${v.inputs} tried)`,
       (v) => v.started && v.inputs <= 1 && v.seconds <= 10,
+      (v) =>
+        !v.started
+          ? "No input starts play"
+          : v.inputs > 1
+            ? `Takes ${v.inputs} inputs to start`
+            : `Takes ${s(v.seconds)} to start`,
     ),
     line(
       "textWall",
       "longest text before 10 s of play",
       (v) => `${v.words} words`,
       (v) => v.words <= 30,
+      (v) => `${v.words} words to read before play`,
     ),
     line(
       "text1080",
       "smallest text at 1080p",
       (v) => `${Math.round(v)} px`,
       (v) => v >= 18,
+      (v) => `Text as small as ${Math.round(v)} px at 1080p`,
     ),
     line(
       "text800",
       "smallest text at 1280×800",
       (v) => `${Math.round(v)} px`,
       (v) => v >= 9,
+      (v) => `Text as small as ${Math.round(v)} px at 1280×800`,
     ),
     line(
       "lost",
@@ -141,6 +162,12 @@ export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string>
           ? `${v.inputs} press${v.inputs === 1 ? "" : "es"}, ${s(v.seconds)} (${v.by})`
           : `${v.by} (${v.inputs} tried)`,
       (v) => v.started && v.inputs <= 1 && v.seconds <= 3,
+      (v) =>
+        !v.started
+          ? "No press retries"
+          : v.inputs > 1
+            ? `Retry takes ${v.inputs} presses`
+            : `Retry takes ${s(v.seconds)}`,
     ),
     line(
       "sound",
@@ -148,12 +175,15 @@ export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string>
       (v) =>
         `${v.firstInput ? "plays" : "silent"} on the first input${v.peakDb === null ? "" : `, mix peak ${v.peakDb.toFixed(1)} dBFS`}`,
       (v) => v.firstInput && (v.peakDb === null || v.peakDb <= -1),
+      (v) =>
+        v.firstInput ? `Sound clips at ${v.peakDb?.toFixed(1)} dBFS` : "Silent on the first input",
     ),
     line(
       "pause",
       "Esc pauses",
       (v) => (v ? "yes" : "no"),
       (v) => v,
+      () => "Esc does not pause",
     ),
     line(
       "frame",
@@ -163,3 +193,10 @@ export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string>
     ),
   ];
 };
+
+export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string> =>
+  gamePlayerReadings(report).map((reading) => reading.line);
+
+/** PURE. What each reading off its line trips, in the order a player meets them. */
+export const gamePlayerTrips = (report: GamePlayerReport): ReadonlyArray<string> =>
+  gamePlayerReadings(report).flatMap((reading) => (reading.trips === null ? [] : [reading.trips]));
