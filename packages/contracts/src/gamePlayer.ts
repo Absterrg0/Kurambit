@@ -58,12 +58,27 @@ export const GamePlayerReport = Schema.Struct({
 export type GamePlayerReport = typeof GamePlayerReport.Type;
 type Key = Exclude<keyof GamePlayerReport, "idleEnded">;
 
+/**
+ * The lines the readings are held to. A reading off its line names the line in its words, so the
+ * person and the agent both see what it missed and by how much.
+ */
+const LINE = {
+  loadSeconds: 1,
+  openSeconds: 10,
+  words: 30,
+  px1080: 18,
+  px800: 9,
+  retrySeconds: 3,
+  peakDb: -1,
+} as const;
+
 const s = (seconds: number) => `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
 const percent = (share: number) => `${Math.round(share * 100)}%`;
 
 /**
  * PURE. One line per reading, as the person and the agent read it: the value, then ✓ or ✗ against
- * its line. A reading off its line also says, as a headline, what it trips.
+ * its line, and off it, the line it missed. A reading off its line also says, as a headline, what
+ * it trips. A reading that is the game's choice (a title, a quiet start) is told with no mark.
  */
 const gamePlayerReadings = (
   report: GamePlayerReport,
@@ -75,28 +90,38 @@ const gamePlayerReadings = (
     ok: (value: Exclude<GamePlayerReport[K], { readonly notMeasured: string }>) => boolean | null,
     trips: (value: Exclude<GamePlayerReport[K], { readonly notMeasured: string }>) => string = () =>
       "",
+    missed = "",
   ) => {
     const value: unknown = report[key];
     if (typeof value === "object" && value !== null && "notMeasured" in value)
       return { line: `${label}: not measured (${String(value.notMeasured)})`, trips: null };
     const good = ok(value as never);
     return {
-      line: `${label}: ${said(value as never)}${good === null ? "" : good ? " ✓" : " ✗"}`,
+      line: `${label}: ${said(value as never)}${good === null ? "" : good ? " ✓" : `${missed && `; ${missed}`} ✗`}`,
       trips: good === false ? trips(value as never) : null,
     };
   };
+  const opened = report.open;
+  // The press the sound reading answers: the one that started play, or Space in a game that opens in it.
+  const pressed =
+    "notMeasured" in opened || !opened.started
+      ? "the first input"
+      : opened.inputs === 0
+        ? "Space in play"
+        : `${opened.by} starts play`;
   return [
     line(
       "load",
       "load",
       (v) => `first frame drawn at ${s(v.ready)}`,
-      (v) => v.ready <= 1,
+      (v) => v.ready <= LINE.loadSeconds,
       (v) => `First frame takes ${s(v.ready)}`,
+      `a player waits on a blank page past ${s(LINE.loadSeconds)}`,
     ),
     line(
       "moves",
       "opening moves",
-      (v) => (v ? "yes" : "no, the first frame is still"),
+      (v) => (v ? "yes" : "no, the first frame is still a second later"),
       (v) => v,
       () => "Opens on a still frame",
     ),
@@ -114,34 +139,38 @@ const gamePlayerReadings = (
         v.started
           ? `${v.inputs} input${v.inputs === 1 ? "" : "s"}, ${s(v.seconds)} (${v.by})`
           : `${v.by} (${v.inputs} tried)`,
-      (v) => v.started && v.inputs <= 1 && v.seconds <= 10,
+      (v) => v.started && v.inputs <= 1 && v.seconds <= LINE.openSeconds,
       (v) =>
         !v.started
           ? "No input starts play"
           : v.inputs > 1
             ? `Takes ${v.inputs} inputs to start`
             : `Takes ${s(v.seconds)} to start`,
+      `play starts on the first input within ${s(LINE.openSeconds)}`,
     ),
     line(
       "textWall",
       "longest text before 10 s of play",
       (v) => `${v.words} words`,
-      (v) => v.words <= 30,
+      (v) => v.words <= LINE.words,
       (v) => `${v.words} words to read before play`,
+      `players skip text over ${LINE.words} words before play`,
     ),
     line(
       "text1080",
       "smallest text at 1080p",
       (v) => `${Math.round(v)} px`,
-      (v) => v >= 18,
+      (v) => v >= LINE.px1080,
       (v) => `Text as small as ${Math.round(v)} px at 1080p`,
+      `text under ${LINE.px1080} px at 1080p is hard to read`,
     ),
     line(
       "text800",
       "smallest text at 1280×800",
       (v) => `${Math.round(v)} px`,
-      (v) => v >= 9,
+      (v) => v >= LINE.px800,
       (v) => `Text as small as ${Math.round(v)} px at 1280×800`,
+      `text under ${LINE.px800} px at 1280×800 is hard to read`,
     ),
     line(
       "lost",
@@ -161,22 +190,24 @@ const gamePlayerReadings = (
         v.started
           ? `${v.inputs} press${v.inputs === 1 ? "" : "es"}, ${s(v.seconds)} (${v.by})`
           : `${v.by} (${v.inputs} tried)`,
-      (v) => v.started && v.inputs <= 1 && v.seconds <= 3,
+      (v) => v.started && v.inputs <= 1 && v.seconds <= LINE.retrySeconds,
       (v) =>
         !v.started
           ? "No press retries"
           : v.inputs > 1
             ? `Retry takes ${v.inputs} presses`
             : `Retry takes ${s(v.seconds)}`,
+      `one press is back in play within ${s(LINE.retrySeconds)}`,
     ),
     line(
       "sound",
       "sound",
       (v) =>
-        `${v.firstInput ? "plays" : "silent"} on the first input${v.peakDb === null ? "" : `, mix peak ${v.peakDb.toFixed(1)} dBFS`}`,
-      (v) => v.firstInput && (v.peakDb === null || v.peakDb <= -1),
-      (v) =>
-        v.firstInput ? `Sound clips at ${v.peakDb?.toFixed(1)} dBFS` : "Silent on the first input",
+        `${pressed}, ${v.firstInput ? "a sound" : "no sound"} within 1 s${v.peakDb === null ? "" : `, mix peak ${v.peakDb.toFixed(1)} dBFS`}`,
+      // A clipping mix is off its line; a quiet first press is the game's choice (a puzzle's start).
+      (v) => (v.peakDb !== null && v.peakDb > LINE.peakDb ? false : v.firstInput || null),
+      (v) => `Sound clips at ${v.peakDb?.toFixed(1)} dBFS`,
+      `a mix over ${LINE.peakDb.toFixed(1)} dBFS clips`,
     ),
     line(
       "pause",

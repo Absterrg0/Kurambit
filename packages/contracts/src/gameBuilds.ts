@@ -796,8 +796,9 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
       return from(facts.player, (report) => {
         const lines = gamePlayerLines(report);
         const off = lines.filter((line) => line.endsWith(" ✗"));
+        // A reading names its missed line after a "; ", so readings part with " · ".
         return {
-          text: off.length === 0 ? lines.join("; ") : off.join("; "),
+          text: (off.length === 0 ? lines : off).join(" · "),
           value: off.length,
           tone: off.length === 0 ? "good" : "bad",
           kind: off.length === 0 ? "clean" : "off",
@@ -1085,7 +1086,7 @@ const checkWords = (
         : {
             // The first thing a player meets that trips them; the value lists every reading.
             sentence: trips.length > 1 ? `${trips[0]}, and ${trips.length - 1} more` : trips[0]!,
-            value: off.map((line) => line.slice(0, -" ✗".length)).join("; "),
+            value: off.map((line) => line.slice(0, -" ✗".length)).join(" · "),
           };
     }
     default:
