@@ -22,13 +22,9 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
    An effect of your own over the whole picture (film grain, scanlines, a
    tint) is tuned the same way, on a thing named for it, with 0 as off: the
    person sees it on everything they look at, and turns it down in Tune.
-4. A message that starts "The person selected this in the running game" is
-   an Ask from the Stage's Inspector. The attached image is the canvas as
-   they asked; the block names the thing (a `ctx.thing` name, a `ctx.tune` id
-   or an `ASSETS` path), its asset and sidecar, its live values (what the
-   person was trying, which may differ from `web/tune.json` and your
-   defaults), where it sits on that frame and its path over the last 10 s.
-   Find it in the code by its id and answer about that thing.
+4. "The person selected this in the running game" is an Ask from the Stage: find the thing it
+   names in the code by its id and answer about that thing. Its live values are what the person
+   was trying, which may differ from `web/tune.json` and your defaults.
 5. Library models face +z, and packs differ in scale (a KayKit piece is 4 m across): face the
    move with `rotation.y = Math.atan2(dir.x, dir.z)` and size each with
    `root.scale.setScalar(n)`. Each `ctx.assets.model` call is its own copy, so each character
