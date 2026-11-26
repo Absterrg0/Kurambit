@@ -4,10 +4,10 @@ import * as Option from "effect/Option";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as GameCopyNotes from "./gameCopies/GameCopyNotes.ts";
+import * as GameTurnNotes from "./GameTurnNotes.ts";
 
 export const layer = Layer.mergeAll(
-  GameCopyNotes.layer,
+  GameTurnNotes.layer,
   Layer.mock(GitWorkflow.GitWorkflowService)({
     pruneWorktrees: () => Effect.void,
     createWorktree: () => Effect.succeed({} as never),

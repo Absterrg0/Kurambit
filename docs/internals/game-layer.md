@@ -406,7 +406,9 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
 (`codexContextEntries`). The rules must change rarely: Claude reads them into the system prompt
 of a process it keeps across turns, and Cursor sends them on the first prompt only. What changes
 every turn, the person's runs since the last one (`personRunsForWorkspace`), goes in front of the
-turn's message text instead, which every provider reads each turn.
+turn's message text instead, which every provider reads each turn. So do the game layer's notes
+(`GameTurnNotes`), among them the problems measured on the folder's build: that measure lands after
+the turn that made the build, and an agent that is not told never asks for it.
 
 What the person decided (an undo and their next message's first sentence, tuned values kept, a
 step skipped, `/remember` notes) is a harness record, not a reasoning skill: a fresh session

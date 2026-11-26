@@ -19,6 +19,7 @@ import { type GameManifest, ProjectId, ThreadId } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as GameBuildMoves from "../orchestration-v2/gameBuilds/GameBuildMoves.ts";
+import * as GameTurnNotes from "../orchestration-v2/GameTurnNotes.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -272,6 +273,7 @@ export const layerFor = (root: string, records = memoryBuildRecords()) =>
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
         Layer.mock(Orchestrator.OrchestratorV2)({ dispatch: records.dispatch }),
         Layer.mock(GameBuildMoves.GameBuildMoves)({ attach: records.attach }),
+        GameTurnNotes.layer,
       ),
     ),
   );

@@ -23,6 +23,7 @@ import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as GameBuildMoves from "../orchestration-v2/gameBuilds/GameBuildMoves.ts";
+import * as GameTurnNotes from "../orchestration-v2/GameTurnNotes.ts";
 import { memoryBuildRecords } from "./gameBuildsTestkit.ts";
 
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -154,6 +155,7 @@ const world = Effect.gen(function* () {
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
         Layer.mock(Orchestrator.OrchestratorV2)({ dispatch: records.dispatch }),
         Layer.mock(GameBuildMoves.GameBuildMoves)({ attach: records.attach }),
+        GameTurnNotes.layer,
       ),
     ),
   );

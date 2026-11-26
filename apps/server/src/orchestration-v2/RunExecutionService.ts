@@ -553,8 +553,8 @@ export interface RunExecutionServiceV2StartRootRunInput {
    * fresh. A game's turn is told the person's decisions since then, or all of them.
    */
   readonly sessionLastTurnAt?: DateTime.Utc;
-  /** Where a chat in a copy of a game works and how far the game is ahead (GameCopies.copyNote). */
-  readonly gameCopy?: string;
+  /** The game layer's blocks for the turn's message (GameTurnNotes). */
+  readonly gameNotes?: ReadonlyArray<string>;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1424,9 +1424,7 @@ export const layer: Layer.Layer<
             ...(personRuns === null
               ? []
               : [`<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>`]),
-            ...(input.gameCopy === undefined || slash
-              ? []
-              : [`<kurambit_game_copy>\n${input.gameCopy}\n</kurambit_game_copy>`]),
+            ...(slash ? [] : (input.gameNotes ?? [])),
           ];
           const turnInput = {
             appThread: input.appThread,

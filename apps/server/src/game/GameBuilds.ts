@@ -33,6 +33,7 @@ import {
   GameBuildId,
   type GameBuildKind,
   gameBuildName,
+  gameFactsView,
   type GameBuildRecord,
   type GameBuildRestore,
   type GameBuildRestoreOutcome,
@@ -62,6 +63,7 @@ import {
 } from "../orchestration-v2/CheckpointService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as GameBuildMoves from "../orchestration-v2/gameBuilds/GameBuildMoves.ts";
+import * as GameTurnNotes from "../orchestration-v2/GameTurnNotes.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { type EarlierBuild, summaryOf, turnChangeBase } from "./buildFacts.ts";
 import { END_FRAME } from "./gameBotRuntime.ts";
@@ -1474,6 +1476,36 @@ const make = Effect.gen(function* () {
         edited: build !== null && !(yield* holdsIn(g, build, String(threadId))),
       };
     });
+
+  /**
+   * What the measure found wrong in the build the folder holds, beside the person's next message.
+   * The measure lands after the turn that made the build, and an agent reads facts only when it
+   * asks (op list), so without this a problem the person sees on the build never reached the agent.
+   * The same bad readings the build's line counts as problems, in keep going's words for them.
+   */
+  const problemsNote: GameTurnNotes.GameTurnNote = ({ threadId, person }) =>
+    Effect.gen(function* () {
+      if (!person) return null;
+      const g = yield* gameOf(threadId);
+      const id = yield* folderCurrent(g);
+      const record = id === null ? null : yield* recordOf(g, id);
+      const resolved = id === null ? undefined : (yield* resolveOf(g, [id])).get(id);
+      if (record === null || resolved === undefined) return null;
+      const problems = gameFactsView(yield* facts.read(resolved)).flatMap((view) =>
+        view.reading._tag === "measured" && view.reading.tone === "bad"
+          ? [`- ${view.label}: ${view.reading.text}`]
+          : [],
+      );
+      if (problems.length === 0) return null;
+      return [
+        "<kurambit_game_problems>",
+        `Kurambit measured ${gameBuildName(record, false)}, the game as this turn starts, and found:`,
+        ...problems,
+        "Do what the person's message asks first. Unless they only asked a question, fix these too when the fix is small and undoes nothing they asked for; otherwise tell them in your reply and make it your `Next:`.",
+        "</kurambit_game_problems>",
+      ].join("\n");
+    }).pipe(Effect.orElseSucceed(() => null));
+  yield* (yield* GameTurnNotes.GameTurnNotes).attach(problemsNote);
 
   const turnBuild: GameBuilds["Service"]["turnBuild"] = (threadId, runId, fallback) =>
     Effect.gen(function* () {

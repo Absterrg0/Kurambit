@@ -48,7 +48,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { makeProviderFailure } from "@kurambit/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
-import * as GameCopyNotes from "./gameCopies/GameCopyNotes.ts";
+import * as GameTurnNotes from "./GameTurnNotes.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import {
   isRestartNoteContinuation,
@@ -217,7 +217,7 @@ export const layer: Layer.Layer<
   | ProviderSessionManager.ProviderSessionManagerV2
   | RunExecutionService.RunExecutionServiceV2
   | RuntimePolicy.RuntimePolicyV2
-  | GameCopyNotes.GameCopyNotes
+  | GameTurnNotes.GameTurnNotes
 > = Layer.effect(
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
@@ -235,7 +235,7 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
-    const copyNotes = yield* GameCopyNotes.GameCopyNotes;
+    const turnNotes = yield* GameTurnNotes.GameTurnNotes;
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
     // These callbacks outlive startup while a run drains background work. Build
@@ -1086,7 +1086,10 @@ export const layer: Layer.Layer<
       if (!runningWrite.committed) {
         return;
       }
-      const copyNote = yield* copyNotes.copyNote(projection.thread.id);
+      const gameNotes = yield* turnNotes.notes({
+        threadId: projection.thread.id,
+        person: message.createdBy === "user",
+      });
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
@@ -1413,7 +1416,7 @@ export const layer: Layer.Layer<
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,
         ...restartContinuationBaseline(projection.runs, run),
         ...lastTurnEnded(projection.runs, run),
-        ...(copyNote === null ? {} : { gameCopy: copyNote }),
+        ...(gameNotes.length === 0 ? {} : { gameNotes }),
         message: {
           messageId: message.id,
           text: userText,

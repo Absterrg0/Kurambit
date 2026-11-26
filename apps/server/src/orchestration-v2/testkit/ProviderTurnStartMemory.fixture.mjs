@@ -45,7 +45,7 @@ const [
   app("provider/ProviderAuthService"),
   app("config"),
   app("serverSettings"),
-  app("orchestration-v2/gameCopies/GameCopyNotes"),
+  app("orchestration-v2/GameTurnNotes"),
 ]);
 let current;
 let fullReads = 0;
