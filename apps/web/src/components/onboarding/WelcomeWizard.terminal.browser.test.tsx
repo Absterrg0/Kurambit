@@ -273,7 +273,7 @@ describe("welcome agent terminal setup", () => {
     expect(state.open).not.toHaveBeenCalled();
     expect(state.write).not.toHaveBeenCalled();
     expect(state.close).not.toHaveBeenCalled();
-    await click("Start making games");
+    await click("Look around first");
     expect(state.complete).toHaveBeenCalledOnce();
     expect(state.done).toHaveBeenCalledExactlyOnceWith();
   });
@@ -389,7 +389,7 @@ describe("welcome agent terminal setup", () => {
     await click("Close");
     expect(hasViewport()).toBe(false);
     expect(state.close).not.toHaveBeenCalled();
-    await click("Start making games");
+    await click("Look around first");
     expect(state.complete).toHaveBeenCalledOnce();
     expect(state.done).toHaveBeenCalledOnce();
   });
