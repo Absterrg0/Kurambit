@@ -2454,8 +2454,10 @@ const make = Effect.gen(function* () {
       });
       if (tree === null || tree === undefined) return;
       const build = { root: summary.root, build: current, key: `${engine}:${tree}`, engine };
+      // Never superseding: it runs beside the reactor, whose turn landing just now may be newer
+      // than the folder this read, and a server just started has nothing else to drop.
       if (owed.has(build.key) || (yield* facts.read(build)).state === "never")
-        yield* facts.measure(build, { queue: "background", supersede: true });
+        yield* facts.measure(build, { queue: "background" });
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("A game's owed build work could not be reconciled.", {
