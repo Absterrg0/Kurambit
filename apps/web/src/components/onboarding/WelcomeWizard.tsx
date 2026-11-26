@@ -228,13 +228,13 @@ function AgentsStep({
         </div>
       </ScrollArea>
       <div className="mt-6 flex items-center justify-end gap-2">
-        {agentReady ? null : checkingAgents ? (
-          <p className="mr-auto text-meta text-muted-foreground">Checking your agents…</p>
-        ) : (
+        {/* The way out stays while checks run: a check that never reports must not strand setup. */}
+        {agentReady ? null : (
           <>
             <p className="mr-auto text-meta text-muted-foreground">
-              Games need a ready agent. You can look around now and connect one later in Settings →
-              Providers.
+              {checkingAgents
+                ? "Checking your agents…"
+                : "Games need a ready agent. You can look around now and connect one later in Settings → Providers."}
             </p>
             <Button variant="ghost-muted" disabled={isFinishing} onClick={onContinue}>
               Look around first
