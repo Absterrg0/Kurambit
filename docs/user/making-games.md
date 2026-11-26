@@ -338,10 +338,11 @@ what fills it:
   open it again to see both.
 
 - **A three.js game is always on.** The stage plays the game folder itself, and **Restart** starts
-  it again at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
-  **Fullscreen** shows only the game, edge to edge. A game opens on its own title screen when it has one. The game pauses and mutes while the stage is hidden and resumes when you come back. It
-  also pauses when you click away from it, into the chat or the Workbench, and plays on when you click it
-  again; turn off **Pause when I click away** in the stage's **More** menu to keep it running.
+  it again at its title screen. A game you are not in (it just came up, or you clicked into the
+  chat or the Workbench) holds on its picture and says **Click to play**: one click plays it and
+  gives it the keyboard, and so does pressing a key while the stage itself is focused. Turn off
+  **Pause when I click away** in the stage's **More** menu to keep it running.
+  **Fullscreen** shows only the game, edge to edge. A game opens on its own title screen when it has one. The game pauses and mutes while the stage is hidden and resumes when you come back.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
   game and closes its preview server. A stopped game stays stopped, in every window and for your
   agent, until **Play** starts it again.

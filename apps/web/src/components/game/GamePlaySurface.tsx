@@ -24,7 +24,7 @@ import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
-import { useStageBridgeFrame } from "./gameStageBridge";
+import { useStageBridge, useStageBridgeFrame } from "./gameStageBridge";
 import type { GameStagePhase } from "./gameStageLogic";
 import type { GameStageDevice } from "./gameStageDevice";
 import { GameDeviceToolbar, useStageDeviceLayout } from "./GameStageDeviceView";
@@ -314,6 +314,7 @@ export function GamePlaySurface({
                   // An unseen frame holds and stays silent until its page is ready; then it runs
                   // for the moment it takes to draw, and takes the Stage.
                   hidden={hidden || (each.role === "unseen" && !running)}
+                  shown={each.role !== "unseen"}
                   drawsReady={bridge.enabled}
                   onStudioMessage={each.role === "kept" ? onKeptMessage : onFrameMessage}
                   // The bridge is the frame on the Stage's: Tune and Art act on the game the
@@ -418,9 +419,15 @@ export function GameFrame({
   onFrame,
   gameName,
   drawsReady = false,
+  shown = true,
 }: {
   url: string;
   title: string;
+  /**
+   * The frame is the one the person sees. A frame starting unseen behind another runs to draw
+   * its first frame, so being away never holds it.
+   */
+  shown?: boolean;
   /**
    * The page runs Kurambit's runtime, which says studio-ready once its first frame is drawn: the
    * wait lasts until then, not just until the page loads, since the game boots after its load
@@ -531,25 +538,17 @@ export function GameFrame({
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
   const pendingAck = useRef(false);
-  // The person played, then clicked away (the chat, the composer, Tune): the game holds the way
-  // a hidden Stage does, so a run is never lost to typing, and plays on when they click back.
+  // Whenever the game does not have the keyboard (the chat, the composer, Tune, a game nobody
+  // clicked into yet), it holds the way a hidden Stage does once it has drawn its first frame: a
+  // run is never lost to typing, and a game nobody plays draws nothing (a drawing game costs a
+  // GPU's worth of work, or most of the processor without one). "Click to play" plays it on.
   // Read from the window's blur and the active element: a click into the frame sends the frame
-  // element no focus event. A page that focused itself as it loaded was never played.
+  // element no focus event.
   const [inGame, setInGame] = useState(false);
-  const [played, setPlayed] = useState(false);
   useEffect(() => {
     let settle = 0;
-    const read = () => {
-      const inside = frameRef.current !== null && document.activeElement === frameRef.current;
-      setInGame(inside);
-      if (
-        inside &&
-        (pointerOver.current ||
-          navigator.userActivation?.isActive === true ||
-          performance.now() - invitedAt.current < 1000)
-      )
-        setPlayed(true);
-    };
+    const read = () =>
+      setInGame(frameRef.current !== null && document.activeElement === frameRef.current);
     const onBlur = () => {
       window.clearTimeout(settle);
       settle = window.setTimeout(read);
@@ -564,7 +563,16 @@ export function GameFrame({
       document.removeEventListener("focusin", read);
     };
   }, []);
-  const away = pauseWhenAway && played && !inGame && !frameFocused && !hidden;
+  const away = pauseWhenAway && shown && started && !inGame && !frameFocused && !hidden;
+  // The person's own freeze is for pointing at things: its layer takes the click, not this one.
+  const frozen = useStageBridge(
+    (state) => bridgeOwner !== null && state.owner === bridgeOwner && state.frozen,
+  );
+  const playHere = () => {
+    invitedAt.current = performance.now();
+    frameRef.current?.focus();
+    frameRef.current?.contentWindow?.focus();
+  };
   const visible = !hidden && !away;
   // The hint is exactly "an unconfirmed pause is outstanding".
   const [unacknowledged, setUnacknowledged] = useState(false);
@@ -617,7 +625,7 @@ export function GameFrame({
   const [mountFocusRequest] = useState(focusRequest);
   useEffect(() => {
     if (focusRequest === 0 || focusRequest === mountFocusRequest) return;
-    // The frame's own focus event takes the "Click to play" cover down.
+    // The frame's own focus event takes the "Click to play" layer down.
     invitedAt.current = performance.now();
     frameRef.current?.focus();
     frameRef.current?.contentWindow?.focus();
@@ -664,7 +672,6 @@ export function GameFrame({
         onLoad={() => {
           setLoaded(true);
           setFrameFocused(false);
-          setPlayed(false);
           // The game's listener may have come up after the last message;
           // a fresh document needs the current state restated.
           frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
@@ -687,8 +694,9 @@ export function GameFrame({
           className="pointer-events-none absolute inset-0 z-30 ring-3 ring-ring ring-inset"
         />
       ) : null}
-      {/* The frame belongs to the game: the bar's Play says it is paused, and a click on the
-          frame plays on. The one hint left is a hide the game never confirmed. */}
+      {/* Held because the person is elsewhere: one click plays it and gives it the keyboard. */}
+      {away && !frozen ? <ClickToPlay onPlay={playHere} /> : null}
+      {/* The one hint left is a hide the game never confirmed. */}
       {unacknowledged ? (
         <Text
           variant="caption"
@@ -702,6 +710,56 @@ export function GameFrame({
         </Text>
       ) : null}
     </>
+  );
+}
+
+let softwareProbe: boolean | undefined;
+/**
+ * Whether this renderer draws WebGL on the CPU (SwiftShader, llvmpipe): no usable GPU. A game
+ * playing there takes most of the machine's cores, even on its title screen.
+ */
+const rendererIsSoftware = () => {
+  if (softwareProbe === undefined) {
+    const gl = document.createElement("canvas").getContext("webgl");
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
+    const renderer =
+      gl == null || info == null ? "" : String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL));
+    softwareProbe = /swiftshader|llvmpipe|softpipe|software/i.test(renderer);
+  }
+  return softwareProbe;
+};
+
+/**
+ * Over a game held while the person is elsewhere: the whole picture is the button, so the first
+ * click plays instead of reaching a title's buttons or pointing at a thing. It says why the game
+ * waits, where the reason is worth knowing.
+ */
+function ClickToPlay({ onPlay }: { onPlay: () => void }) {
+  return (
+    <button
+      type="button"
+      data-game-click-to-play=""
+      className="absolute inset-0 z-20 flex cursor-pointer flex-col items-center justify-center gap-1 bg-black/25 p-4 text-stage-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+      onClick={onPlay}
+    >
+      <span className="flex items-center gap-2 rounded-full bg-black/75 py-1.5 ps-3 pe-4 ring-1 ring-white/15">
+        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
+        <Text variant="label" tone="inherit">
+          Click to play
+        </Text>
+      </span>
+      <Text
+        variant="caption"
+        tone="inherit"
+        render={
+          <span className="max-w-full truncate rounded-md bg-black/60 px-2 text-stage-muted" />
+        }
+      >
+        {rendererIsSoftware()
+          ? "Paused while you're away: with no graphics card, playing uses most of the processor"
+          : "Paused while you're away from the game"}
+      </Text>
+    </button>
   );
 }
 

@@ -72,7 +72,6 @@ import { cn } from "../../lib/utils";
 import { isElectron } from "../../env";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { Button } from "../ui/button";
-import { toastManager } from "../ui/toast";
 import {
   Dialog,
   DialogDescription,
@@ -379,24 +378,6 @@ const rendererHasWebGl = () => {
   }
   return webGlProbe;
 };
-
-let softwareProbe: boolean | undefined;
-/**
- * Whether this renderer draws WebGL on the CPU (SwiftShader, llvmpipe): no usable GPU. A game
- * playing there takes most of the machine's cores, even on its title screen.
- */
-const rendererIsSoftware = () => {
-  if (softwareProbe === undefined) {
-    const gl = document.createElement("canvas").getContext("webgl");
-    const info = gl?.getExtension("WEBGL_debug_renderer_info");
-    const renderer =
-      gl == null || info == null ? "" : String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL));
-    softwareProbe = /swiftshader|llvmpipe|softpipe|software/i.test(renderer);
-  }
-  return softwareProbe;
-};
-/** Said once a session: why the Stage comes up paused on this machine. */
-let softwareSaid = false;
 
 function NoWebGlCard() {
   return (
@@ -1064,15 +1045,6 @@ function ThreadGameStage({
     if (!freezable || pausedDone.current === pausedKey) return;
     pausedDone.current = pausedKey;
     freezeStage();
-    if (rendererIsSoftware() && !softwareSaid) {
-      softwareSaid = true;
-      toastManager.add({
-        type: "info",
-        title: "The game starts paused on this computer",
-        description:
-          "Kurambit draws games here without a graphics card, so a playing game uses most of the processor. Press Play to play.",
-      });
-    }
   }, [freezable, pausedKey]);
   const leaveStage = rewind.leave;
   useEffect(() => {
@@ -1224,10 +1196,9 @@ function ThreadGameStage({
       setFrameBuild(landing ? null : folderBuild);
       setHeldBuild(false);
       // A paused game is not mid-run, so a new build replaces it at once; the person's pause
-      // stands, or every build would set the Stage running again. Where WebGL is drawn on the
-      // CPU every page comes up paused once it drew: playing costs most of the machine's cores.
-      // Restart is the person's ask to play, and plays.
-      setPausedKey((frozen && frameFold !== null) || rendererIsSoftware() ? computed.key : null);
+      // stands, or every build would set the Stage running again. Restart is the person's ask
+      // to play, and plays. (A game nobody is in holds on its own, GameFrame's away.)
+      setPausedKey(frozen && frameFold !== null ? computed.key : null);
     }
   } else if (frameBuild === null && folderBuild !== null && !landing) setFrameBuild(folderBuild);
   const frame = leaving && frameFold !== null ? frameFold : computed;
