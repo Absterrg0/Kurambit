@@ -12,7 +12,7 @@ import {
   loadedWords,
 } from "./gameQa.ts";
 import { GameSavedPlaysReading, savedPlayWords, savedPlaysWords } from "./gamePlays.ts";
-import { GamePlayerReport, gamePlayerLines } from "./gamePlayer.ts";
+import { GamePlayerReport, gamePlayerLines, gamePlayerTrips } from "./gamePlayer.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -1079,10 +1079,12 @@ const checkWords = (
     case "first-minute": {
       if (facts.player.status !== "measured") return null;
       const off = gamePlayerLines(facts.player.value).filter((line) => line.endsWith(" ✗"));
+      const trips = gamePlayerTrips(facts.player.value);
       return off.length === 0
         ? { sentence: "The first minute plays clean", value: null }
         : {
-            sentence: "The first minute trips a player",
+            // The first thing a player meets that trips them; the value lists every reading.
+            sentence: trips.length > 1 ? `${trips[0]}, and ${trips.length - 1} more` : trips[0]!,
             value: off.map((line) => line.slice(0, -" ✗".length)).join("; "),
           };
     }
