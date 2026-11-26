@@ -252,10 +252,30 @@ const layerResourceDiagnostics = Layer.mergeAll(
   ProcessResourceMonitor.layer.pipe(Layer.provide(layerResourceTelemetry)),
 );
 
+// NodeHttpServer listens as soon as its layer builds, but HttpRouter.serve adds
+// its request listener only after every route's services are built. Node leaves
+// a request in that gap unanswered, so the desktop's readiness probe waited out
+// its 1 s timeout on most launches. Answer 503 until the routes take over.
+function answerUnavailableUntilServed(server: NodeHttp.Server): NodeHttp.Server {
+  const unavailable = (_request: NodeHttp.IncomingMessage, response: NodeHttp.ServerResponse) => {
+    response.writeHead(503).end();
+  };
+  const onListener = (event: string | symbol) => {
+    if (event !== "request") return;
+    server.off("request", unavailable);
+    server.off("newListener", onListener);
+  };
+  server.on("request", unavailable);
+  server.on("newListener", onListener);
+  return server;
+}
+
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
-    return NodeHttpServer.layer(() => guardHttpResponseWriteErrors(NodeHttp.createServer()), {
+    const makeServer = () =>
+      answerUnavailableUntilServed(guardHttpResponseWriteErrors(NodeHttp.createServer()));
+    return NodeHttpServer.layer(makeServer, {
       host: "127.0.0.1",
       port: config.port,
       gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
