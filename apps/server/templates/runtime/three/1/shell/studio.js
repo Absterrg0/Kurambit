@@ -328,7 +328,7 @@ export function installStudio({
     // The harness's clock (shell.js): held, play moves only as `advanceClock(seconds)` steps it,
     // as fast as the page allows; the promise settles once that much game time has played.
     holdClock: (on) => holdClock(on),
-    advanceClock: (seconds, wallMs) => advanceClock(seconds, wallMs),
+    advanceClock: (seconds, wallMs, draw) => advanceClock(seconds, wallMs, draw),
     // The model sheet (shell/sheet.js): one named thing alone, from four sides, with its
     // size, triangles and draw calls; names() lists the things with a body.
     ...(sheet === undefined

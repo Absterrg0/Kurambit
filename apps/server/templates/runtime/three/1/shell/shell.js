@@ -183,11 +183,12 @@ const holdClock = (on) => {
 /** Real time an advance may take past twice its game time; a page slower than that stops short. */
 const ADVANCE_WALL_MS = 10_000;
 /**
- * Steps play by `seconds` of game time, then draws a frame; settles with the game seconds it
- * stepped. Settles at once when nothing can move it (no run, paused, or the clock not held) and
- * after `wallMs` of real time at most.
+ * Steps play by `seconds` of game time, then draws a frame unless `draw` is false (a harness that
+ * reads the run, never its picture: in software each frame costs most of a second); settles with
+ * the game seconds it stepped. Settles at once when nothing can move it (no run, paused, or the
+ * clock not held) and after `wallMs` of real time at most.
  */
-const advanceClock = (seconds, wallMs = 2 * seconds * 1000 + ADVANCE_WALL_MS) =>
+const advanceClock = (seconds, wallMs = 2 * seconds * 1000 + ADVANCE_WALL_MS, draw = true) =>
   new Promise((resolve) => {
     // Nothing to step: settles on the next task, so a waiting loop never spins the page.
     if (harnessClock === null || run === null) return setTimeout(() => resolve(0), 0);
@@ -199,7 +200,7 @@ const advanceClock = (seconds, wallMs = 2 * seconds * 1000 + ADVANCE_WALL_MS) =>
       clearTimeout(timer);
       const stepped = seconds - Math.max(0, clock.left);
       Object.assign(clock, { left: null, reached: null });
-      redraw = true;
+      redraw ||= draw;
       resolve(stepped);
     };
   });

@@ -15,9 +15,9 @@
 //
 // A page a player opens never runs this: the harness calls window.__studio.qa on a page it
 // opened with its counters on (studio.js). The play moves the run on the game's own clock
-// (shell.js harnessClock), stepped as fast as the page allows: a slow machine makes it no longer and
-// no different. Only a run compiling and the count of frames a game asks for outside its run
-// take real time.
+// (shell.js harnessClock), stepped as fast as the page allows and drawn only now and then: a slow
+// machine makes it no longer and no different. Only a run compiling and the count of frames a game
+// asks for outside its run take real time.
 import { sfxAsked } from "./audio.js";
 import { Juice } from "./juice.js";
 import { GameState, SHELL_KEYS } from "./run-state.js";
@@ -71,8 +71,8 @@ export function createQa({
   hold,
   advance,
 }) {
-  /** Game time on the run's own clock. */
-  const span = (ms) => advance(ms / 1000);
+  /** Game time on the run's own clock. Nothing here reads a picture, so a span draws none. */
+  const span = (ms) => advance(ms / 1000, undefined, false);
   // Juice effects asked for, counted by wrapping its methods once the QA play first runs.
   let juice = 0;
   let counting = false;
