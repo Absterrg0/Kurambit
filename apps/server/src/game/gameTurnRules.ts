@@ -53,10 +53,13 @@ const runsSection = (runs: ReadonlyArray<KeptRun>, sinceTurn: boolean): string |
   if (first === undefined) return null;
   const oneBuild = runs.every((run) => run.build === first.build);
   const text = STUDIO_TEXT.turnRules.personRuns;
+  const stage = runs.find((run) => run.stage === true && run.play.viewport !== undefined)?.play
+    .viewport;
   const header = fill(text.header, {
     when: sinceTurn ? text.sinceTurn : text.recently,
     times: runs.length === 1 ? text.once : fill(text.times, { n: runs.length }),
     on: oneBuild && first.build !== null ? ` on ${buildWords(first.build)}` : "",
+    size: stage === undefined ? "" : fill(text.size, stage),
   });
   const lines: Array<string> = [];
   let used = header.length;

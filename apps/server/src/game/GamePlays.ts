@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
       const build = input.build ?? (yield* folderBuild(threadId));
       const at = DateTime.formatIso(yield* DateTime.now);
       const kept = yield* Effect.tryPromise({
-        try: () => keepPlay(root, { at, build, play: input.play }),
+        try: () => keepPlay(root, { at, build, stage: true, play: input.play }),
         catch: io(root, "The play could not be kept."),
       });
       return { kept };

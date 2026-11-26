@@ -32,6 +32,7 @@ import {
   GamePlay,
   type GamePlayScript,
   type GamePlayScriptRun,
+  GAME_PLAY_VIEWPORT_MAX,
   type GamePlayViewport,
   keptRunTag,
 } from "@kurambit/contracts";
@@ -55,7 +56,7 @@ import { keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.
 import { makeGameBrowser } from "./gameChromium.ts";
 import { openPagePlay, type PlayDidNotBoot, type PlayLaunch } from "./playLaunch.ts";
 import { WebBrowserGone, WebPageCrashed } from "./webPlaySession.ts";
-import { keepPlay } from "./playFiles.ts";
+import { keepPlay, stageViewport } from "./playFiles.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 
 const decodePlay = Schema.decodeUnknownOption(GamePlay);
@@ -397,6 +398,18 @@ const make = Effect.gen(function* () {
       exploreLive.set(root, live);
       return live;
     });
+  /** A Stage larger than a session page can be, scaled down to fit in its shape. */
+  const fitted = (size: GamePlayViewport): GamePlayViewport => {
+    const scale = Math.min(
+      1,
+      GAME_PLAY_VIEWPORT_MAX.width / size.width,
+      GAME_PLAY_VIEWPORT_MAX.height / size.height,
+    );
+    return {
+      width: Math.max(64, Math.round(size.width * scale)),
+      height: Math.max(64, Math.round(size.height * scale)),
+    };
+  };
   /**
    * Opens a session on the current sources of a browser game: the static
    * folder served over loopback, played in headless Chromium.
@@ -409,7 +422,12 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const { backend, ctx } = yield* engines.context(root);
-      const viewport = input.viewport ?? backend.profile.viewport;
+      const viewport =
+        input.viewport ??
+        (yield* Effect.promise(() => stageViewport(root).catch(() => null)).pipe(
+          Effect.map((stage) => (stage === null ? null : fitted(stage))),
+        )) ??
+        backend.profile.viewport;
       const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
       const browser = yield* gameBrowser("Explore session", root);
       const saves = yield* keptSavesFor({

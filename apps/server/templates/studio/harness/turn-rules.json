@@ -43,9 +43,10 @@
   "personRuns": {
     "sinceTurn": "Since your last turn the person",
     "recently": "The person recently",
-    "header": "{when} played {times}{on}, newest first. `game_play` op `replay` `{\"run\": \"<id>\", \"at\": <seconds>}` shows any moment of a run.",
+    "header": "{when} played {times}{on}{size}, newest first. `game_play` op `replay` `{\"run\": \"<id>\", \"at\": <seconds>}` shows any moment of a run.",
     "once": "once",
     "times": "{n} times",
+    "size": ", on a Stage {width}×{height} px (game_play opens at that size)",
     "more": "- and {n} more"
   }
 }

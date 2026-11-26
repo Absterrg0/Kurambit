@@ -171,10 +171,15 @@ export const GamePlayScript = Schema.Struct({
 });
 export type GamePlayScript = typeof GamePlayScript.Type;
 
-/** The session page's size, as a player's window would be. */
+/** The largest session page: a person's Stage past it plays scaled down to fit. */
+export const GAME_PLAY_VIEWPORT_MAX = { width: 1920, height: 1080 } as const;
+
+/** The session page's size, as a player's window would be; as small as a person's Stage can get. */
 export const GamePlayViewport = Schema.Struct({
-  width: Schema.Int.check(Schema.isBetween({ minimum: 320, maximum: 1920 })),
-  height: Schema.Int.check(Schema.isBetween({ minimum: 240, maximum: 1080 })),
+  width: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: GAME_PLAY_VIEWPORT_MAX.width })),
+  height: Schema.Int.check(
+    Schema.isBetween({ minimum: 64, maximum: GAME_PLAY_VIEWPORT_MAX.height }),
+  ),
 });
 export type GamePlayViewport = typeof GamePlayViewport.Type;
 

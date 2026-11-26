@@ -31,6 +31,8 @@ export const KeptPlay = Schema.Struct({
   at: Schema.String,
   /** The build the folder held, unless it was edited since; null: the folder as it was. */
   build: Schema.NullOr(GameBuildId),
+  /** Kept from the person's Stage, not from an agent's or a check's play. */
+  stage: Schema.optionalKey(Schema.Literal(true)),
   play: GamePlay,
 });
 export type KeptPlay = typeof KeptPlay.Type;
@@ -134,6 +136,21 @@ export const keptSince = async (
     runs.push({ ...kept.value, id: name.slice(0, -".json".length) });
   }
   return runs;
+};
+
+/**
+ * The size the person last played the game at on the Stage, from the newest run kept there; null
+ * when none says. An agent's play opens at it, so what shows only at their size shows to it too.
+ */
+export const stageViewport = async (root: string) => {
+  const { dir, names } = await keptNames(root);
+  for (const name of names) {
+    const text = await NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null);
+    const kept = text === null ? Option.none() : decodeKept(text);
+    if (Option.isSome(kept) && kept.value.stage === true && kept.value.play.viewport !== undefined)
+      return kept.value.play.viewport;
+  }
+  return null;
 };
 
 /** A saved play's file name: its name lowercased, each run of other characters a dash. */
