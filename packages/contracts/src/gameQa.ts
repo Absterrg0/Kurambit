@@ -200,7 +200,7 @@ export const GAME_SCREEN_SIZES = [
   { name: "widescreen", width: 2560, height: 1080 },
 ] as const;
 
-/** The game booted fresh at one window size, played a moment and read as a player would see it. */
+/** The game's page at one window size, played a moment and read as a player would see it. */
 export const GameScreenSize = Schema.Struct({
   name: Schema.Literals(["phone", "widescreen"]),
   width: Count,

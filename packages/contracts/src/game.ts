@@ -932,9 +932,9 @@ export const GameCheckResult = Schema.Struct({
     ]),
   ),
   /**
-   * After the QA play (three.js): the game booted fresh at phone portrait and at widescreen and
+   * After the QA play (three.js): its page resized to phone portrait, then to widescreen, and
    * played a moment at each. `problems` say what broke at which size, each with its frame in
-   * `report`; not part of `ok`. `report.bytes` is what the page downloads to start.
+   * `report`; not part of `ok`. `report.bytes` is what that page downloaded to start and play.
    */
   screens: Schema.optionalKey(
     Schema.Union([
@@ -948,8 +948,9 @@ export const GameCheckResult = Schema.Struct({
     ]),
   ),
   /**
-   * After the screens (three.js): the page as a player opens it, its first minute measured as a
-   * player meets it (gamePlayer.ts). `lines` say each reading against its line; not part of `ok`.
+   * On the boot page once it is checked (three.js): the page as a player opens it, its first
+   * minute measured as a player meets it (gamePlayer.ts). `lines` say each reading against its
+   * line; not part of `ok`.
    */
   player: Schema.optionalKey(
     Schema.Union([

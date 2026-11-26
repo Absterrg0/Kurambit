@@ -6,8 +6,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { PNG } from "pngjs";
 import { THREE_VIEWPORT, type GamePlayerReport } from "@kurambit/contracts";
-import type { GameBrowser } from "./gameChromium.ts";
-import { openWebPlaySession, type WebPlaySession } from "./webPlaySession.ts";
+import type { WebPlaySession } from "./webPlaySession.ts";
 
 /** How long a press may take to start play before the next kind of press is tried. */
 const PRESS_WAIT_MS = 1_500;
@@ -28,7 +27,7 @@ const BOOT_MS = 30_000;
  * sound that started (Web Audio sources and media elements), and the mix's sample peak, read by
  * an analyser placed between the graph and the speakers.
  */
-const PROBE = `(() => {
+export const PLAYER_PROBE = `(() => {
   const kp = { ready: null, played: null, inputs: [], sounds: [], peak: 0, graph: false };
   window.__kp = kp;
   const raf = window.requestAnimationFrame.bind(window);
@@ -194,37 +193,10 @@ const light = (png: PNG) => {
 };
 
 /**
- * The first minute, measured on its own page; `notOpened` says what kept that page from opening
- * or booting (the check's other pages say whether the game boots). A reading that could not be
- * taken says so.
+ * The first minute, on the page as a player opens it, which the check booted with PLAYER_PROBE
+ * as its init script. A reading that could not be taken says why.
  */
-export const measurePlayer = async (input: {
-  readonly browser: GameBrowser;
-  readonly url: string;
-  readonly folder: string;
-  readonly signal?: AbortSignal | undefined;
-}): Promise<GamePlayerReport | { readonly notOpened: string }> => {
-  const session = await openWebPlaySession({
-    browser: input.browser,
-    url: input.url,
-    ...THREE_VIEWPORT,
-    bootTimeoutMs: BOOT_MS,
-    signal: input.signal,
-    initScript: PROBE,
-  }).catch((cause: unknown) => ({ notOpened: firstLine(cause) }));
-  if ("notOpened" in session) return session;
-  try {
-    return await probe(session, input.folder, input.browser.software);
-  } finally {
-    await session.close();
-  }
-};
-
-/** An error's first line, short enough to say beside a fact. */
-export const firstLine = (cause: unknown) =>
-  (cause instanceof Error ? cause.message : String(cause)).split("\n")[0]!.slice(0, 240);
-
-const probe = async (
+export const measurePlayer = async (
   session: WebPlaySession,
   folder: string,
   software: boolean,

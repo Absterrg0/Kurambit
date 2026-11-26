@@ -180,7 +180,7 @@ export interface GameEngineBackend {
    * Boot check of the entries the engine boots: what the player opens first, then the
    * gameplay entry. With `scene`, an engine that has a scene report plays the gameplay entry
    * briefly with random input and returns it; with `qa`, one that has a QA play plays it, then
-   * opens the gameplay entry at the other screen sizes. With `look`, an engine that can opens
+   * the other screen sizes, and the first minute on the page as a player opens it. With `look`, an engine that can opens
    * only the gameplay entry for a moment of play and returns its frame, errors and frame rate:
    * the agent's quick look between edits.
    */

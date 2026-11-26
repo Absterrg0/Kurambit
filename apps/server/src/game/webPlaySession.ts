@@ -537,9 +537,9 @@ export interface WebPlaySession extends PlaySession {
   /** After `close`: the kept session's storage to write back, or null. */
   readonly keptStorage: () => KeptStorage | null;
   /**
-   * After `close`: how play ran, as the page's shell measured it (`__studio.perf()`:
-   * frame times, GPU time, the render scale), read just before the page closed; null
-   * when the shell has none or the page could not answer.
+   * After `settle`: how play ran, as the page's shell measured it (`__studio.perf()`:
+   * frame times, GPU time, the render scale); null when the shell has none or the page could
+   * not answer.
    */
   readonly perf: () => unknown;
   /**
@@ -550,9 +550,8 @@ export interface WebPlaySession extends PlaySession {
   /** The window, the part of it the canvas covers and the HUD's reading (READ_SCREEN); null when the page did not answer. */
   readonly screen: () => Promise<unknown>;
   /**
-   * After `close`: the scene report of a session opened with `sceneReport`, read just before
-   * the page closed; "no-shell" when the game's shell has none, null when it could not be read
-   * or was not asked for.
+   * After `settle`: the scene report of a session opened with `sceneReport`; "no-shell" when the
+   * game's shell has none, null when it could not be read or was not asked for.
    */
   readonly scene: () => PageScene;
   /**
@@ -579,6 +578,11 @@ export interface WebPlaySession extends PlaySession {
   readonly sheet: (name: string | null, views?: ReadonlyArray<SheetView>) => Promise<unknown>;
   /** The window at another size, as a player's would be; the page lays itself out again. */
   readonly resize: (width: number, height: number) => Promise<void>;
+  /**
+   * Reads `perf` and `scene` now and keeps them, so the page can go on to other plays without
+   * changing them (`close` settles a session nothing settled).
+   */
+  readonly settle: () => Promise<void>;
 }
 
 /**
@@ -1265,6 +1269,41 @@ export const openWebPlaySession = async (input: {
     let kept: KeptStorage | null = null;
     let perf: unknown = null;
     let scene: PageScene = input.sceneReport === true && sceneStarted === null ? "no-shell" : null;
+    // How the play ran, read once: before more play on the same page (settle) or as it closes.
+    const settle = once(async () => {
+      if (endedWith === null) {
+        const text = await bounded(
+          page.evaluate(READ_STUDIO_PERF).catch(() => null),
+          PLAY_BOUNDS.webCallMs,
+        );
+        if (typeof text === "string")
+          try {
+            perf = JSON.parse(text);
+          } catch {
+            perf = null;
+          }
+        if (sceneStarted === true) {
+          // Reading encodes up to eight frames as PNG on the page's main thread: 0.2 s on a
+          // GPU, over 3 s in software with a second play beside it (a build's idle and
+          // random-input plays), so it gets a still's bound, not one input's.
+          const report = await bounded(
+            page.evaluate(READ_SCENE).catch(() => null),
+            PLAY_BOUNDS.stillMs,
+          );
+          if (typeof report === "string")
+            try {
+              scene = { raw: JSON.parse(report) };
+            } catch {
+              scene = null;
+            }
+          // Its looks cost each frame: a play after this one on the page should not pay for them.
+          await bounded(
+            page.evaluate("window.__studio?.scene?.stop?.()").catch(() => undefined),
+            PLAY_BOUNDS.webCallMs,
+          );
+        }
+      }
+    });
     const session: WebPlaySession = {
       protocol: PLAY_SESSION_PROTOCOL,
       capabilities: new Set(["setState"]),
@@ -1431,6 +1470,7 @@ export const openWebPlaySession = async (input: {
           });
       },
       refusedStates: () => refused,
+      settle,
       // A frame an agent is shown waits as an act's does, on the page's measured frame cost: a
       // check's look on a slow software page lost both its frames to a bound made for 30 fps.
       still: async (path, withSmall = false) =>
@@ -1451,33 +1491,7 @@ export const openWebPlaySession = async (input: {
       // session, and a page our own bound already gave up on has nothing to answer.
       close: once(async () => {
         try {
-          if (endedWith === null) {
-            const text = await bounded(
-              page.evaluate(READ_STUDIO_PERF).catch(() => null),
-              PLAY_BOUNDS.webCallMs,
-            );
-            if (typeof text === "string")
-              try {
-                perf = JSON.parse(text);
-              } catch {
-                perf = null;
-              }
-            if (sceneStarted === true) {
-              // Reading encodes up to eight frames as PNG on the page's main thread: 0.2 s on a
-              // GPU, over 3 s in software with a second play beside it (a build's idle and
-              // random-input plays), so it gets a still's bound, not one input's.
-              const report = await bounded(
-                page.evaluate(READ_SCENE).catch(() => null),
-                PLAY_BOUNDS.stillMs,
-              );
-              if (typeof report === "string")
-                try {
-                  scene = { raw: JSON.parse(report) };
-                } catch {
-                  scene = null;
-                }
-            }
-          }
+          await settle();
           if (keptStorage !== null && endedWith === null) {
             // Leaving the page fires pagehide as closing the tab would, so a game
             // that saves then (KEEP_ACROSS_RUNS progress does) has written it.

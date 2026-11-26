@@ -57,7 +57,7 @@ import {
   type PageScene,
 } from "./sceneReport.ts";
 import { checkPerformance } from "./playPerf.ts";
-import { firstLine, measurePlayer } from "./playerProbe.ts";
+import { measurePlayer, PLAYER_PROBE } from "./playerProbe.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
 /**
@@ -175,23 +175,8 @@ const sceneOf = async (
 
 const decodeQa = Schema.decodeUnknownOption(GameQaReport);
 const decodeReplay = Schema.decodeUnknownOption(GameReplayRun);
-/**
- * The QA play's report as the check's: what to fix, or why it was not played. `notOpened` is
- * what kept the QA play's own page from opening after the game's page booted: the checker's
- * failure, never a verdict on the game.
- */
-const qaOf = (
-  played: { readonly raw: unknown; readonly ms: number } | null,
-  notOpened: string | null,
-): GameCheckQa => {
-  if (played === null)
-    return notOpened === null
-      ? { status: "not-measured", why: "the game's page crashed or timed out before the QA play" }
-      : {
-          status: "not-measured",
-          why: `Kurambit's checker could not open its own page for the QA play (${notOpened})`,
-          cause: "checker",
-        };
+/** The QA play's report as the check's: what to fix, or why it was not played. */
+const qaOf = (played: { readonly raw: unknown; readonly ms: number }): GameCheckQa => {
   if (played.raw === "no-qa")
     return {
       status: "not-measured",
@@ -211,10 +196,7 @@ const qaOf = (
   };
 };
 
-/**
- * Play at each other screen size: long enough to start a run, draw at that size and throw what
- * the size makes the game throw. Every build's measure pays a boot per size, so it stays short.
- */
+/** Play at each other screen size: long enough to draw at it and throw what the size makes it throw. */
 const SCREEN_PLAY_MS = 1_000;
 const decodeScreenRead = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -228,70 +210,48 @@ const decodeScreenRead = Schema.decodeUnknownOption(
   }),
 );
 
-type ScreenInput = {
-  readonly browser: GameBrowser;
-  readonly url: string;
-  readonly root: string;
-  readonly folder: string;
-  readonly known: ReadonlySet<string>;
-  readonly signal: AbortSignal;
-};
-
-/** One size: booted fresh, played a moment, read, its frame kept, and the bytes it loaded. */
-const playScreen = async (
-  input: ScreenInput,
-  size: (typeof GAME_SCREEN_SIZES)[number],
-): Promise<{ readonly size: GameScreenSize; readonly bytes: number | null }> => {
-  const errors: Array<string> = [];
-  const heard = (text: string) => {
-    const line = text.slice(0, 200);
-    if (!input.known.has(line) && !errors.includes(line) && errors.length < 3) errors.push(line);
-  };
-  const at = { name: size.name, width: size.width, height: size.height };
-  const session = await openWebPlaySession({
-    browser: input.browser,
-    url: input.url,
-    width: size.width,
-    height: size.height,
-    bootTimeoutMs: BOOT_TIMEOUT_MS,
-    signal: input.signal,
-    onPageEvent: (event) => {
+/**
+ * The gameplay page resized to phone portrait, then to widescreen, as a player's window would be,
+ * each played a moment and read as a player there sees it: what it throws that the check's own
+ * size did not (`known`), how much of the window its canvas covers and whether the HUD's DOM text
+ * stays on it, with a frame. One page, not a fresh boot per size: in software a 3D game's start
+ * costs seconds a page. A HUD drawn in the canvas is not in the DOM: not measured.
+ */
+const playScreens = async (
+  session: WebPlaySession,
+  input: {
+    readonly root: string;
+    readonly folder: string;
+    readonly signal: AbortSignal;
+    readonly known: ReadonlySet<string>;
+    readonly listen: (listener: (event: WebPageEvent) => void) => void;
+  },
+): Promise<GameCheckScreens> => {
+  const started = Date.now();
+  const sizes: Array<GameScreenSize> = [];
+  for (const size of GAME_SCREEN_SIZES) {
+    const errors: Array<string> = [];
+    const heard = (text: string) => {
+      const line = text.slice(0, 200);
+      if (!input.known.has(line) && !errors.includes(line) && errors.length < 3) errors.push(line);
+    };
+    input.listen((event) => {
       if (event.kind === "pageerror") heard(event.text);
       else if (event.kind === "script-failed")
         heard(`script failed to load: ${event.url} (${event.status})`);
       else if (event.level === "error" && !/favicon\.ico/i.test(event.text)) heard(event.text);
-    },
-    stopOnPageError: true,
-    countBytes: true,
-  }).catch((cause: unknown) => {
-    if (cause instanceof WebPageCrashed) {
-      heard(`the page crashed: ${cause.message}`);
-      return null;
-    }
-    if (cause instanceof WebPageNotReady) return null;
-    throw cause;
-  });
-  if (session === null)
-    return {
-      size: { ...at, booted: false, canvas: null, errors, hudOff: null, frame: null },
-      bytes: null,
-    };
-  const frame = NodePath.join(input.folder, `screen-${size.name}.png`);
-  // Closed even when the play is stopped part way: the session owns a browser.
-  const { read, kept } = await (async () => {
-    try {
-      await playRandomly(session.input, SCREEN_PLAY_MS, input.signal);
-      const read = Option.getOrNull(decodeScreenRead(await session.screen()));
-      return { read, kept: await session.still(frame) };
-    } finally {
-      await session.close();
-    }
-  })();
-  if (read === null) heard("the page stopped answering at this size");
-  const hud = read?.hud ?? null;
-  return {
-    size: {
-      ...at,
+    });
+    await session.resize(size.width, size.height);
+    await playRandomly(session.input, SCREEN_PLAY_MS, input.signal);
+    const read = Option.getOrNull(decodeScreenRead(await session.screen()));
+    const frame = NodePath.join(input.folder, `screen-${size.name}.png`);
+    const kept = await session.still(frame);
+    if (read === null) heard("the page stopped answering at this size");
+    const hud = read?.hud ?? null;
+    sizes.push({
+      name: size.name,
+      width: size.width,
+      height: size.height,
       booted: true,
       canvas:
         read?.canvas == null
@@ -300,38 +260,10 @@ const playScreen = async (
       errors,
       hudOff: hud === null || hud.texts === 0 ? null : hud.off.slice(0, 8),
       frame: kept ? NodePath.relative(input.root, frame) : null,
-    },
-    bytes: session.loadedBytes(),
-  };
-};
-
-/**
- * The gameplay entry booted fresh at phone portrait and at widescreen, side by side so a build
- * waits for one boot, not two, each played a moment and read as a player there sees it: whether
- * it starts, what it throws that the check's own size did not (`known`), how much of the window
- * its canvas covers and whether the HUD's DOM text stays on it, with a frame. A HUD drawn in the
- * canvas is not in the DOM: not measured. Also the bytes its page loads to start. Our browser
- * failing is ours: not measured.
- */
-const playScreens = async (input: ScreenInput): Promise<GameCheckScreens> => {
-  const started = Date.now();
-  // Settled, not raced: a size whose browser failed never leaves the other's open behind it.
-  const played = await Promise.allSettled(GAME_SCREEN_SIZES.map((size) => playScreen(input, size)));
-  const failed = played.find((each) => each.status === "rejected");
-  if (failed !== undefined) {
-    if (input.signal.aborted) throw failed.reason;
-    const cause: unknown = failed.reason;
-    return {
-      status: "not-measured",
-      why: `the browser failed while opening the game at other screen sizes: ${(cause instanceof Error ? cause.message : String(cause)).slice(0, 200)}`,
-    };
+    });
   }
-  const done = played.flatMap((each) => (each.status === "fulfilled" ? [each.value] : []));
-  const loaded = done.flatMap((each) => (each.bytes === null ? [] : [each.bytes]));
-  const report = {
-    sizes: done.map((each) => each.size),
-    bytes: loaded.length === 0 ? null : Math.max(...loaded),
-  };
+  // The bytes the page loaded to start and play are read as it closes, after this.
+  const report = { sizes, bytes: null };
   return {
     status: "measured",
     problems: gameScreensFindings(report).map((found) => `${found.said}: ${found.fix}`),
@@ -460,12 +392,19 @@ export const makeThreeBackend = (
             message: `Console error: ${text}`,
           });
       };
+      // The page's events go to whichever play is on it now: the check's own, the first minute
+      // (heard by nobody, as on a player's page), the QA play, then the other screen sizes.
+      let listen = onPageEvent;
       // The page as the player opens it, then the gameplay entry the template
       // names (the starter's shell boots straight into play with "?play"), so a
       // failure in gameplay start cannot hide behind the title screen.
       // A quick look boots once: the page as the player opens it, then play started on that
       // same page (the bridge's "play"), so every look shows the agent its opening too. A game
       // that refuses "play" there gets the gameplay entry of its own.
+      // A build's measure boots each entry once too: the first minute plays on the boot page
+      // once it is checked, the QA play and the other screen sizes on the gameplay page once its
+      // play is read. A 3D game's start costs seconds a page in software, so this is four boots
+      // fewer; what each play reads is taken before the next begins.
       const gameplayUrl =
         input.gameplayScene === "" ? null : new URL(input.gameplayScene, server.url).href;
       const entries: Array<readonly [GameCheckView["entry"], string]> = [["boot", server.url]];
@@ -477,12 +416,11 @@ export const makeThreeBackend = (
       // What each entry looked like as the check left it: the agent judges its game from these.
       const views: Array<GameCheckView> = [];
       let playPerf: unknown = null;
-      // The QA play's report, from a page of its own after the measured play.
+      // The QA play's report, on the gameplay page after the measured play.
       let qaPlay: { readonly raw: unknown; readonly ms: number } | null = null;
-      let qaNotOpened: string | null = null;
       // The other screen sizes, played after the QA play.
       let screens: GameCheckScreens | undefined;
-      // The first minute as a player meets it, after the screens (playerProbe.ts).
+      // The first minute as a player meets it, on the boot page (playerProbe.ts).
       let player: GameCheckResult["player"];
       // The agent waits on this play: it goes first in the play lane and is never interrupted.
       const played = yield* playLane
@@ -493,15 +431,21 @@ export const makeThreeBackend = (
               let timedOut = false;
               for (const [entry, entryUrl] of entries) {
                 const measure = input.scene && entry === "gameplay";
+                listen = onPageEvent;
                 const session = await openWebPlaySession({
                   browser,
                   url: entryUrl,
                   ...THREE_VIEWPORT,
                   bootTimeoutMs: BOOT_TIMEOUT_MS,
                   signal,
-                  onPageEvent,
+                  onPageEvent: (event) => listen(event),
                   stopOnPageError: true,
                   sceneReport: measure,
+                  ...(input.qa
+                    ? entry === "boot"
+                      ? { initScript: PLAYER_PROBE }
+                      : { qa: true, countBytes: true }
+                    : {}),
                 }).catch((cause: unknown) => {
                   // The game's page crashing is what the check measures; our browser
                   // going away is not, and fails the check below.
@@ -520,103 +464,92 @@ export const makeThreeBackend = (
                   return null;
                 });
                 if (session !== null) {
-                  const started = Date.now();
-                  // A short random-input play the scene report watches; without one (or with a
-                  // shell that has none, where nothing would watch it), one extra beat. Either
-                  // way late module errors still land in the listeners above.
                   let looking = input.look && entry === "gameplay";
-                  if (measure && session.scene() !== "no-shell")
-                    await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
-                  else if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
-                  else await new Promise((resolve) => setTimeout(resolve, 2000));
-                  const view = NodePath.join(temporary, `view-${entry}.png`);
-                  if (await session.still(view, true))
-                    views.push({ entry, path: NodePath.relative(ctx.root, view) });
-                  if (input.look && entry === "boot" && gameplayUrl !== null) {
-                    const refusedBefore = session.refusedStates().length;
-                    await session.setState("play", {});
-                    if (session.refusedStates().length > refusedBefore)
-                      entries.push(["gameplay", gameplayUrl]);
-                    else {
-                      await playRandomly(session.input, LOOK_PLAY_MS, signal);
-                      const played = NodePath.join(temporary, "view-gameplay.png");
-                      if (await session.still(played, true))
-                        views.push({
-                          entry: "gameplay",
-                          path: NodePath.relative(ctx.root, played),
-                        });
-                      looking = true;
-                    }
-                  }
-                  await session.close();
-                  if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
-                  if (measure || looking) playPerf = session.perf();
-                  reached.push(entry);
-                  // A look's play started on the boot page reached gameplay there.
-                  if (looking && entry === "boot") reached.push("gameplay");
-                } else if (entry !== bootEntry && !crashed)
-                  issues.push({
-                    file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
-                    message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
-                  });
-                if (timedOut) break;
-              }
-              // The QA play: every control, Retry and the HUD, on its own page so its restarts
-              // never touch the timed play above or its frame rate.
-              if (input.qa && reached.includes("gameplay") && !timedOut && !crashed) {
-                const started = Date.now();
-                const session = await openWebPlaySession({
-                  browser,
-                  url: new URL(input.gameplayScene, server.url).href,
-                  ...THREE_VIEWPORT,
-                  bootTimeoutMs: BOOT_TIMEOUT_MS,
-                  signal,
-                  // Errors after Retry are the report's own finding, not a second issue.
-                  onPageEvent: (event) => {
-                    if (event.kind === "pageerror") {
-                      thrown.add(event.text.slice(0, 200));
-                      log(`QA play pageerror: ${event.text.slice(0, 300)}`);
-                    }
-                  },
-                  qa: true,
-                }).catch((cause: unknown) => {
-                  qaNotOpened = firstLine(cause);
-                  log(`QA play's page did not open: ${qaNotOpened}`);
-                  return null;
-                });
-                if (session !== null) {
-                  const raw = await session.qa();
-                  await session.close();
-                  qaPlay = { raw, ms: Date.now() - started };
-                }
-                screens = await playScreens({
-                  browser,
-                  url: new URL(input.gameplayScene, server.url).href,
-                  root: ctx.root,
-                  folder: temporary,
-                  known: thrown,
-                  signal,
-                });
-                const probed = Date.now();
-                const report = await measurePlayer({
-                  browser,
-                  url: server.url,
-                  folder: temporary,
-                  signal,
-                });
-                player =
-                  "notOpened" in report
-                    ? {
-                        status: "not-measured",
-                        why: `Kurambit's checker could not open its own page for the first minute (${report.notOpened})`,
-                        cause: "checker",
+                  // Closed even when a play is stopped part way: the session owns a browser.
+                  try {
+                    const started = Date.now();
+                    // A short random-input play the scene report watches; without one (or with a
+                    // shell that has none, where nothing would watch it), one extra beat. Either
+                    // way late module errors still land in the listeners above.
+                    if (measure && session.scene() !== "no-shell")
+                      await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
+                    else if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
+                    else await new Promise((resolve) => setTimeout(resolve, 2000));
+                    const view = NodePath.join(temporary, `view-${entry}.png`);
+                    if (await session.still(view, true))
+                      views.push({ entry, path: NodePath.relative(ctx.root, view) });
+                    if (input.look && entry === "boot" && gameplayUrl !== null) {
+                      const refusedBefore = session.refusedStates().length;
+                      await session.setState("play", {});
+                      if (session.refusedStates().length > refusedBefore)
+                        entries.push(["gameplay", gameplayUrl]);
+                      else {
+                        await playRandomly(session.input, LOOK_PLAY_MS, signal);
+                        const played = NodePath.join(temporary, "view-gameplay.png");
+                        if (await session.still(played, true))
+                          views.push({
+                            entry: "gameplay",
+                            path: NodePath.relative(ctx.root, played),
+                          });
+                        looking = true;
                       }
-                    : {
+                    }
+                    await session.settle();
+                    if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
+                    if (measure || looking) playPerf = session.perf();
+                    if (input.qa && entry === "boot") {
+                      listen = () => undefined;
+                      const probed = Date.now();
+                      const report = await measurePlayer(session, temporary, browser.software);
+                      player = {
                         status: "measured",
                         lines: gamePlayerLines(report),
                         report,
                         ms: Date.now() - probed,
                       };
+                    }
+                    // The QA play: every control, Retry and the HUD. It restarts the run, after
+                    // the play above was read. Errors after Retry are its own finding, not an issue.
+                    if (input.qa && entry === "gameplay") {
+                      listen = (event) => {
+                        if (event.kind !== "pageerror") return;
+                        thrown.add(event.text.slice(0, 200));
+                        log(`QA play pageerror: ${event.text.slice(0, 300)}`);
+                      };
+                      const qaStarted = Date.now();
+                      qaPlay = { raw: await session.qa(), ms: Date.now() - qaStarted };
+                      screens = await playScreens(session, {
+                        root: ctx.root,
+                        folder: temporary,
+                        signal,
+                        known: thrown,
+                        listen: (listener) => {
+                          listen = listener;
+                        },
+                      });
+                    }
+                  } finally {
+                    await session.close();
+                  }
+                  if (screens?.status === "measured")
+                    screens = {
+                      ...screens,
+                      report: { ...screens.report, bytes: session.loadedBytes() },
+                    };
+                  reached.push(entry);
+                  // A look's play started on the boot page reached gameplay there.
+                  if (looking && entry === "boot") reached.push("gameplay");
+                } else if (input.qa && entry === bootEntry)
+                  player = {
+                    status: "not-measured",
+                    why: "the page as a player opens it did not boot",
+                  };
+                else if (entry !== bootEntry && !crashed)
+                  issues.push({
+                    file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
+                    message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
+                  });
+                if (timedOut) break;
               }
               return { timedOut };
             },
@@ -659,7 +592,7 @@ export const makeThreeBackend = (
             sceneOf(scenePlay, temporary, NodePath.relative(ctx.root, temporary), browser),
           )
         : undefined;
-      const qa = input.qa && reached.includes("gameplay") ? qaOf(qaPlay, qaNotOpened) : undefined;
+      const qa = qaPlay === null ? undefined : qaOf(qaPlay);
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.map((line) => line.text).join("\n")}\n`).catch(
