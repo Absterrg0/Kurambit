@@ -1896,7 +1896,6 @@ function ThreadGameStage({
               </>
             }
             onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-            onNote={setMessage}
           />
         )}
       </div>

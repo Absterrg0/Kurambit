@@ -379,7 +379,7 @@ const buildFactsSignal = Atom.family((key: string): Atom.Atom<string> => {
       const build = listed.find((entry) => entry.id === ref);
       return build === undefined
         ? null
-        : `${build.facts.state}:${build.facts.notMeasured}:${build.facts.chips.map((chip) => chip.text).join(",")}`;
+        : `${build.facts.state}:${build.facts.notMeasured}:${build.facts.good}:${build.facts.bad}:${build.facts.chips.map((chip) => chip.text).join(",")}`;
     });
     if (parts.every((part) => part !== null)) return parts.join("|");
     return get(threadScopeSignal(`${environmentId}\0${threadId}\0facts`));
@@ -510,8 +510,8 @@ export const gameEnvironment = {
     tag: WS_METHODS.gameStatus,
   }),
   builds: buildsQuery,
-  // A measured build's facts never change, so they are read once; others
-  // reread only when that build's own facts moved (see buildFactsSignal).
+  // Reread only when that build's own facts moved (see buildFactsSignal): a measured build
+  // still gains readings, as a test play saved after it was measured replays on it.
   buildFacts: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:buildFacts",
     tag: WS_METHODS.gameBuildFacts,
@@ -519,7 +519,6 @@ export const gameEnvironment = {
     idleTtlMs: 5 * 60_000,
     refreshTrigger: ({ environmentId, input }) =>
       buildFactsSignal(`${environmentId}\0${input.threadId}\0${refKey(input.build)}`),
-    isFinal: (facts) => facts.state === "measured",
   }),
   // What one build changed: read once, since a build's change never does.
   buildChanges: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {

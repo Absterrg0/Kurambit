@@ -82,7 +82,6 @@ export function GameStageBar({
   responsive,
   stageItems,
   onFocus,
-  onNote,
 }: {
   threadRef: ScopedThreadRef;
   /** The game's code can lose a run: only then is there a Can't lose to offer. */
@@ -108,7 +107,6 @@ export function GameStageBar({
   stageItems: ReactNode;
   /** Gives the game the keyboard back after a control took it. */
   onFocus: () => void;
-  onNote: (text: string) => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
   const capabilities = useThreadStageBridge(threadKey, (state) => state.capabilities, NONE);
@@ -236,7 +234,6 @@ export function GameStageBar({
         viewItems={viewItems}
         responsive={responsive}
         stageItems={stageItems}
-        onNote={onNote}
         onFocus={onFocus}
       />
     </div>

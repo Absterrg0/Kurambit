@@ -22,6 +22,7 @@ import {
 } from "../ui/menu";
 import { Popover, PopoverPopup } from "../ui/popover";
 import { Text } from "../ui/text";
+import { toastManager } from "../ui/toast";
 import { ArrivalDot } from "./ArrivalDot";
 import { attachRunToComposer } from "./gameComposerContext";
 import { GameControlsMenu } from "./GameControlsMenu";
@@ -118,7 +119,6 @@ export function GameRunMenu({
   viewItems,
   responsive,
   stageItems,
-  onNote,
   onFocus,
 }: {
   threadRef: ScopedThreadRef;
@@ -130,7 +130,6 @@ export function GameRunMenu({
   viewItems: ReactNode;
   responsive: GameArrival;
   stageItems: ReactNode;
-  onNote: (text: string) => void;
   onFocus: () => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
@@ -222,9 +221,12 @@ export function GameRunMenu({
     setName("");
     setKept(null);
     runs.saved();
-    onNote(
-      `${result.value.replaced ? "Replaced" : "Saved"} "${result.value.name}" as a test play: every build replays it, in Checks.`,
-    );
+    // An answer that passes: the Stage's own line stays until dismissed, over the game.
+    toastManager.add({
+      type: "success",
+      title: `${result.value.replaced ? "Replaced" : "Saved"} "${result.value.name}" as a test play`,
+      description: "Every build replays it, in Checks.",
+    });
   };
   return (
     <>
