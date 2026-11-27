@@ -28,11 +28,12 @@ export const writeFileStringAtomically = (input: {
       yield* fs.makeDirectory(targetDirectory, { recursive: true });
       // The temp directory is cleanup, not part of the write: failing to remove
       // it (a virus scanner holding it on Windows) must not fail a write that
-      // already landed.
+      // already landed. Its dot name keeps watchers that skip dotfiles (a game's
+      // live reload) from taking its own create and remove for a change.
       const tempDirectory = yield* Effect.acquireRelease(
         fs.makeTempDirectory({
           directory: targetDirectory,
-          prefix: `${path.basename(targetPath)}.`,
+          prefix: `.${path.basename(targetPath)}.`,
         }),
         (directory) => fs.remove(directory, { recursive: true }).pipe(Effect.ignore({ log: true })),
       );
