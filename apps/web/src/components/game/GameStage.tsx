@@ -1276,13 +1276,15 @@ function ThreadGameStage({
   const staleChipVisible =
     failureVisible === null &&
     (phase.kind === "playing" || phase.kind === "ready" ? phase.stale : false);
+  // Until the list names the folder's new build, its current is still the one on screen.
+  const liveName = folderBuild !== null && folderBuild !== frameBuild ? folderShort : null;
   const held =
     frame.heldFor !== "focus"
       ? null
       : stageKind === "live" && !newBuild
         ? { label: "Your agent changed the game while you were playing", action: "Reload" }
         : {
-            label: `${(stageKind === "live" ? folderShort : heldName) ?? "A new build"} is ready`,
+            label: `${(stageKind === "live" ? liveName : heldName) ?? "A new build"} is ready`,
             action: "Play it",
           };
   const runningSomething =
