@@ -1382,7 +1382,8 @@ function WhatChanged({
   // A reading that got worse is a problem Checks lists under it: said once, there.
   const movedLines = (moved?.changed ?? [])
     .filter((row) => row.id !== "saved-plays" && row.tone !== "worse")
-    .map((row) => `${row.name} ${row.a ?? "not measured"} → ${row.b ?? "not measured"}`);
+    // The check's name is a sentence of its own ("The first minute plays clean"), as in Compare.
+    .map((row) => `${row.name}: ${row.a ?? "not measured"} → ${row.b ?? "not measured"}`);
   const said = [
     ...(changes.data?.tunes ?? []).map((change) => tuneLine(change, things)),
     ...savedPlays,
