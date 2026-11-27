@@ -1393,16 +1393,24 @@ export const openWebPlaySession = async (input: {
             PLAY_BOUNDS.webCallMs,
           );
         const wanted = new Set(held);
-        for (const key of wanted)
-          if (!keysDown.has(key)) {
-            if ((await call(page.keyboard.down(toPlaywrightKey(key)))) === TIMED_OUT) return;
-            keysDown.add(key);
-          }
-        for (const key of keysDown)
-          if (!wanted.has(key)) {
-            if ((await call(page.keyboard.up(toPlaywrightKey(key)))) === TIMED_OUT) return;
-            keysDown.delete(key);
-          }
+        // A key lands on the page's next frame, which drawn in software at a wide window takes
+        // most of a second: the keys that change together go together, not a frame each.
+        const change = async (down: boolean) => {
+          const landed = await Promise.all(
+            [...(down ? wanted : keysDown)]
+              .filter((key) => wanted.has(key) !== keysDown.has(key))
+              .map((key) =>
+                call(page.keyboard[down ? "down" : "up"](toPlaywrightKey(key))).then((answer) => {
+                  if (answer === TIMED_OUT) return false;
+                  if (down) keysDown.add(key);
+                  else keysDown.delete(key);
+                  return true;
+                }),
+              ),
+          );
+          return landed.every(Boolean);
+        };
+        if (!(await change(true)) || !(await change(false))) return;
         for (const tap of taps) {
           if ((await call(page.keyboard.down(toPlaywrightKey(tap)))) === TIMED_OUT) return;
           await sleep(15);
