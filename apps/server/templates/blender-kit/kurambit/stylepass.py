@@ -7,7 +7,7 @@ it (base colour, metallic, roughness, emission, normal maps, transmission, alpha
 textures scaled to budget.texture. From STYLE.json:
   palette  a hex list, which a lock keeps only for the flat finish the person picked: the pack look
            of KayKit and Kenney, measured from their files. Every material snaps to its nearest
-           colour (in Lab; a textured one face by face, by the texture under each face) on one
+           colour (in Lab; a textured or vertex-painted one face by face, by its colours there) on one
            small atlas of vertical-gradient swatches, the whole palette, one for the game; each
            face samples its swatch by its height in the model, so every part gets the same soft
            top light (shading.gradient) and a ramp that warms toward the top (shading.hue). A
@@ -134,6 +134,34 @@ def _feeding_image(socket, depth=4):
     return None
 
 
+def _feeding_attribute(socket, depth=4):
+    """The colour attribute upstream of a socket ("" for the active one), or None."""
+    nodes = [link.from_node for link in socket.links]
+    for _ in range(depth):
+        for n in nodes:
+            if n.type == "VERTEX_COLOR":
+                return n.layer_name
+            if n.type == "ATTRIBUTE" and n.attribute_type == "GEOMETRY":
+                return n.attribute_name
+        nodes = [link.from_node for n in nodes for i in n.inputs for link in i.links]
+    return None
+
+
+def _loop_colours(me, name):
+    """(loops, 3) sRGB 0..1 of a mesh's colour attribute, or None when it has no such attribute."""
+    attr = me.color_attributes.get(name) if name else me.color_attributes.active_color
+    if attr is None:
+        return None
+    rgba = np.empty(len(attr.data) * 4, np.float32)
+    attr.data.foreach_get("color_srgb", rgba)
+    rgb = rgba.reshape(-1, 4)[:, :3]
+    if attr.domain == "POINT":
+        loop_v = np.empty(len(me.loops), np.int32)
+        me.loops.foreach_get("vertex_index", loop_v)
+        rgb = rgb[loop_v]
+    return rgb if attr.domain in ("POINT", "CORNER") else None
+
+
 def material_colour(m):
     """(sRGB colour, emissive) of a material: its Principled base colour, or the mean of the image
     feeding it."""
@@ -175,36 +203,48 @@ def _srgb_pixels(image):
     return rgb
 
 
-def _face_swatches(me, images, mat_index, loop_poly, plab):
-    """Per face, the palette entry its material's base-colour image shows under it, for faces whose
-    material is textured (a generator's one baked texture, a pack's colormap): (swatch (n,), mask (n,)).
+def _face_swatches(me, sources, mat_index, loop_poly, plab):
+    """Per face, the palette entry its material shows on it, for faces whose material is many colours:
+    a base-colour image (a generator's one baked texture, a pack's colormap) sampled under the face, or
+    a colour attribute (an agent's vertex paint) at its corners: (swatch (n,), mask (n,)).
     Each corner and the centre (counted twice) snap on their own and the face takes the most votes,
     so a face across a colour edge takes one side, never a third colour its mean would land on."""
     n = len(me.polygons)
     swatch, mask = np.zeros(n, np.int64), np.zeros(n, bool)
-    uv_layer = me.uv_layers.active
-    if uv_layer is None or not any(img is not None for img in images):
+    if not any(s is not None for s in sources):
         return swatch, mask
-    uv = np.empty(len(me.loops) * 2, np.float32)
-    uv_layer.data.foreach_get("uv", uv)
-    uv = uv.reshape(-1, 2)
+    uv_layer = me.uv_layers.active
+    uv = None
+    if uv_layer is not None:
+        uv = np.empty(len(me.loops) * 2, np.float32)
+        uv_layer.data.foreach_get("uv", uv)
+        uv = uv.reshape(-1, 2)
     count = np.bincount(loop_poly, minlength=n)
-    centre = np.stack([np.bincount(loop_poly, weights=uv[:, i], minlength=n) for i in (0, 1)], 1) / np.maximum(count, 1)[:, None]
+    mean = lambda per_loop: np.stack([np.bincount(loop_poly, weights=per_loop[:, i], minlength=n) for i in range(per_loop.shape[1])], 1) / np.maximum(count, 1)[:, None]
     plab = np.array(plab)
     votes = np.zeros((n, len(plab)))
-    for k, img in enumerate(images):
-        if img is None:
+    for k, source in enumerate(sources):
+        if source is None:
             continue
         loops = (mat_index == k)[loop_poly]
         faces = np.where((mat_index == k) & (count > 0))[0]
         if len(faces) == 0:
             continue
-        at = np.concatenate([uv[loops], centre[faces], centre[faces]])
         owner = np.concatenate([loop_poly[loops], faces, faces])
-        h, w = img.shape[:2]
-        x = np.clip((np.mod(at[:, 0], 1.0) * w).astype(np.int64), 0, w - 1)
-        y = np.clip((np.mod(at[:, 1], 1.0) * h).astype(np.int64), 0, h - 1)
-        lab = _lab_np(img[y, x].astype(np.float64))
+        kind, data = source
+        if kind == "attribute":
+            centre = mean(data)[faces]
+            rgb = np.concatenate([data[loops], centre, centre])
+        else:
+            if uv is None:
+                continue
+            centre = mean(uv)[faces]
+            at = np.concatenate([uv[loops], centre, centre])
+            h, w = data.shape[:2]
+            x = np.clip((np.mod(at[:, 0], 1.0) * w).astype(np.int64), 0, w - 1)
+            y = np.clip((np.mod(at[:, 1], 1.0) * h).astype(np.int64), 0, h - 1)
+            rgb = data[y, x]
+        lab = _lab_np(rgb.astype(np.float64))
         label = np.argmin(((lab[:, None, :] - plab[None]) ** 2).sum(2), 1)
         np.add.at(votes, (owner, label), 1)
         mask[faces] = True
@@ -359,21 +399,27 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
         glows = np.array([bool(not is_decal(i) and i[1]) for i in infos])[mat_index]
         decal = np.array([i[1] if is_decal(i) else -1 for i in infos])[mat_index]
         loop_poly = np.repeat(np.arange(np_), [p.loop_total for p in me.polygons])
-        # A textured material (a generator's baked texture, a pack's colormap) is many colours:
-        # each face snaps by what its texture shows under it, not by the mean.
-        images = []
+        # A textured or vertex-painted material is many colours: each face snaps by what its
+        # texture shows under it or its corners' colours, not by the material's own colour.
+        sources = []
         for slot in o.material_slots:
             m = slot.material
             if _decal_image(m) is not None:
-                images.append(None)  # painted, never snapped
+                sources.append(None)  # painted, never snapped
                 continue
             bsdf = next((nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED"), None) if m is not None and m.node_tree is not None else None
             image = _feeding_image(bsdf.inputs["Base Color"]) if bsdf is not None else None
-            if image is not None and image.name not in pixel_cache:
-                pixel_cache[image.name] = _srgb_pixels(image)
-            images.append(pixel_cache.get(image.name) if image is not None else None)
+            if image is not None:
+                if image.name not in pixel_cache:
+                    pixel_cache[image.name] = _srgb_pixels(image)
+                pixels = pixel_cache[image.name]
+                sources.append(("image", pixels) if pixels is not None else None)
+                continue
+            name = _feeding_attribute(bsdf.inputs["Base Color"]) if bsdf is not None else None
+            painted = _loop_colours(me, name) if name is not None else None
+            sources.append(("attribute", painted) if painted is not None else None)
         if hexes:
-            snapped, textured = _face_swatches(me, images, mat_index, loop_poly, plab)
+            snapped, textured = _face_swatches(me, sources, mat_index, loop_poly, plab)
             swatch[textured] = snapped[textured]
         used.update(int(k) for k in np.unique(swatch[decal < 0]))
         co = np.empty(len(me.vertices) * 3)
