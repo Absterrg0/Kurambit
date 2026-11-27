@@ -31,6 +31,10 @@ const NOT_SENDING = Atom.make(null);
 
 const isGameOperationError = Schema.is(GameOperationError);
 
+/** The server's own answer (why it refused) before the reason's generic advice, which is for agents. */
+export const gameFailureText = (failure: unknown) =>
+  isGameOperationError(failure) ? (failure.detail ?? failure.message) : String(failure);
+
 export const restoreQuestion = (name: string) =>
   `Go back to ${name}?\nThe engine project, art/ and ASSETS.md become this build's; what the folder holds now is saved as a build first, so you can undo this. Notes, PLAN.md, VISION.md and run records stay as they are.`;
 
@@ -81,10 +85,7 @@ export function useBuildRestore(
     if (result._tag === "Failure") {
       setBuildRestoreSending(threadRef, null);
       const failure = squashAtomCommandFailure(result);
-      // The server's own answer (why it refused) before the reason's generic advice.
-      const text = isGameOperationError(failure)
-        ? (failure.detail ?? failure.message)
-        : String(failure);
+      const text = gameFailureText(failure);
       if (isGameOperationError(failure)) key.current = null;
       setError({ target, text });
       return text;

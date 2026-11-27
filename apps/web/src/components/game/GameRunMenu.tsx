@@ -36,6 +36,7 @@ import {
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { playSeconds, RESUME_MAX_S, resumable, resumeNotice } from "./gameStageResume";
+import { gameFailureText } from "./useBuildActions";
 import { type GameArrival, useArrival } from "./useGameArrivals";
 import type { StageRuns } from "./useStageRuns";
 
@@ -200,7 +201,7 @@ export function GameRunMenu({
         play: { ...play, outcome: { ...play.outcome, text: "" } },
       },
     });
-    if (result._tag === "Failure") setFailed(String(squashAtomCommandFailure(result)));
+    if (result._tag === "Failure") setFailed(gameFailureText(squashAtomCommandFailure(result)));
     else setKept(result.value.kept);
   };
   const save = async () => {
@@ -214,7 +215,7 @@ export function GameRunMenu({
     });
     setSaving(false);
     if (result._tag === "Failure") {
-      setFailed(String(squashAtomCommandFailure(result)));
+      setFailed(gameFailureText(squashAtomCommandFailure(result)));
       return;
     }
     setNaming(false);
