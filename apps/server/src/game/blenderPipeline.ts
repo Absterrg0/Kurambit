@@ -418,11 +418,11 @@ export const measurementText = (
     );
   if (m.floating !== undefined)
     lines.push(
-      `- Parts over 0.5 mm from every other part: ${m.floating.length === 0 ? "none" : m.floating.map((part) => `${part.part} ${(part.gap * 1000).toFixed(1)} mm`).join(", ")}.`,
+      `- Objects over 0.5 mm from every other object: ${m.floating.length === 0 ? "none" : m.floating.map((part) => `${part.part} ${(part.gap * 1000).toFixed(1)} mm`).join(", ")}.`,
     );
   if (m.unsupported !== undefined && m.unsupported.length > 0)
     lines.push(
-      `- Parts touching others only from the side, nothing under them: ${m.unsupported.map((part) => `${part.part} ${metres(part.height)} up`).join(", ")}.`,
+      `- Objects touching others only from the side, nothing under them: ${m.unsupported.map((part) => `${part.part} ${metres(part.height)} up`).join(", ")}.`,
     );
   if (m.influences !== undefined)
     lines.push(
