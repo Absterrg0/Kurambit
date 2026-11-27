@@ -435,19 +435,24 @@ const make = Effect.gen(function* () {
       );
     });
   /** The file's first `from`, the scaffold's mention of the old name, as `to`; else untouched. */
-  const renameIn = (file: string, from: string, to: string) =>
-    Effect.tryPromise(() => NodeFSP.readFile(file, "utf8")).pipe(
+  const renameIn = (root: string, file: string, from: string, to: string) =>
+    Effect.tryPromise(() => NodeFSP.readFile(NodePath.join(root, file), "utf8")).pipe(
+      Effect.map((text) => (text.includes(from) ? text.replace(from, () => to) : null)),
       Effect.flatMap((text) =>
-        text.includes(from)
-          ? writeFileStringAtomically({
-              filePath: file,
-              contents: text.replace(from, () => to),
-              followLink: false,
-            }).pipe(
+        text === null
+          ? Effect.void
+          : // A name is no change the running game plays: its Stage must not reload or offer it.
+            preview.quietWrite(root, file, text).pipe(
+              Effect.andThen(
+                writeFileStringAtomically({
+                  filePath: NodePath.join(root, file),
+                  contents: text,
+                  followLink: false,
+                }),
+              ),
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.provideService(Path.Path, path),
-            )
-          : Effect.void,
+            ),
       ),
     );
   const named = (workspaceRoot: string, name: string) =>
@@ -463,11 +468,12 @@ const make = Effect.gen(function* () {
       // The scaffold writes the name as it is; a new one is escaped, so it cannot end the title.
       const html = name.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
       yield* renameIn(
-        NodePath.join(root, manifest.project, "index.html"),
+        root,
+        NodePath.join(manifest.project, "index.html"),
         `<title>${old}</title>`,
         `<title>${html}</title>`,
       );
-      yield* renameIn(NodePath.join(root, "BRIEF.md"), `# ${old}\n`, `# ${name}\n`);
+      yield* renameIn(root, "BRIEF.md", `# ${old}\n`, `# ${name}\n`);
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("The game's files keep their old name.", { workspaceRoot, cause }),
