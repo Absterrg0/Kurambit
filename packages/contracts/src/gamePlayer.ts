@@ -18,8 +18,9 @@ export const GamePlayerReport = Schema.Struct({
   /** Share of the first frame a title, menu or text in the page covers (0..1). */
   cover: reading(Schema.Number),
   /**
-   * Presses and seconds from navigation to play (the probe's own reading between presses left
-   * out); `by` names the press that started it, or that none did.
+   * The press that started play (`by`, or that none did) and the seconds to play: to the first
+   * frame, then from that press. `inputs` is 1 once one worked (the kinds the probe tried before
+   * it are its guessing, not a player's presses), else how many kinds it tried.
    */
   open: reading(
     Schema.Struct({
@@ -37,7 +38,7 @@ export const GamePlayerReport = Schema.Struct({
   /** Whether a run with no input at all ends in a loss within 120 s; how such a run ended, and when. */
   lost: reading(Schema.Boolean),
   idleEnded: Schema.optionalKey(Schema.Struct({ won: Schema.Boolean, at: Seconds })),
-  /** From a loss back to play: presses, seconds from the first, and the press that did it. */
+  /** From a loss back to play: the press that did it and its seconds to play, as `open`. */
   retry: reading(
     Schema.Struct({
       inputs: Schema.Int,
@@ -141,13 +142,8 @@ const gamePlayerReadings = (
         v.started
           ? `${v.inputs} input${v.inputs === 1 ? "" : "s"}, ${s(v.seconds)} (${v.by})`
           : `${v.by} (${v.inputs} tried)`,
-      (v) => v.started && v.inputs <= 1 && v.seconds <= LINE.openSeconds,
-      (v) =>
-        !v.started
-          ? "No input starts play"
-          : v.inputs > 1
-            ? `Takes ${v.inputs} inputs to start`
-            : `Takes ${s(v.seconds)} to start`,
+      (v) => v.started && v.seconds <= LINE.openSeconds,
+      (v) => (v.started ? `Takes ${s(v.seconds)} to start` : "No input starts play"),
       `play starts on the first input within ${s(LINE.openSeconds)}`,
     ),
     line(
@@ -192,13 +188,8 @@ const gamePlayerReadings = (
         v.started
           ? `${v.inputs} press${v.inputs === 1 ? "" : "es"}, ${s(v.seconds)} (${v.by})`
           : `${v.by} (${v.inputs} tried)`,
-      (v) => v.started && v.inputs <= 1 && v.seconds <= LINE.retrySeconds,
-      (v) =>
-        !v.started
-          ? "No press retries"
-          : v.inputs > 1
-            ? `Retry takes ${v.inputs} presses`
-            : `Retry takes ${s(v.seconds)}`,
+      (v) => v.started && v.seconds <= LINE.retrySeconds,
+      (v) => (v.started ? `Retry takes ${s(v.seconds)}` : "No press retries"),
       `one press is back in play within ${s(LINE.retrySeconds)}`,
     ),
     line(

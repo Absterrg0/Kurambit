@@ -255,9 +255,10 @@ export const measurePlayer = async (
     await sleep(200);
   };
   /**
-   * Presses as a person would, one kind at a time, until the game is playing: how many presses,
-   * the game's seconds from the first to play, the one that worked (null: none did) and what was
-   * heard before it. The probe's own reading between presses is never counted.
+   * Tries one kind of press at a time until the game is playing: the press that worked (null:
+   * none did), the game's seconds from it to play, and what was heard before it. A person presses
+   * the key the screen names, so the kinds the probe tried before it are its own guessing, not
+   * the player's presses; when none worked, the count is how many kinds were tried.
    */
   const pressUntilPlaying = async (presses: ReadonlyArray<Press>) => {
     let inputs = 0;
@@ -282,8 +283,8 @@ export const measurePlayer = async (
       for (let waited = 0; waited < PRESS_WAIT_MS; waited += 100) {
         if ((await state())?.state === "playing")
           return {
-            inputs,
-            seconds: played / 1000,
+            inputs: 1,
+            seconds: (played - from) / 1000,
             by: press.by,
             pressed: { sounds, at: pressedAt, since: played - from } satisfies Pressed,
           };
