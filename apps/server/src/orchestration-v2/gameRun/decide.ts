@@ -189,9 +189,11 @@ const DIRECTION_TAIL = `Take the next part of it that is not done yet. Once ever
 /** How a step that finishes one the time cap stopped begins; such a step is never finished again. */
 const FINISH_LEAD = "Finish step";
 // Keep going measures every step's build itself and undoes one that breaks the game, so the
-// step spends its time on the change, not on a full check of its own.
+// step spends its time on the change, not on a full check of its own. Whether a visible change
+// looks better is beyond its facts: a step that looked only after editing kept changes blind
+// judges called worse, so it looks before and after and compares.
 const STEP_TAIL =
-  "This is a keep-going step: make this one change, look at it, then your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
+  "This is a keep-going step: make this one change. If it shows on screen, look before you change anything and again after, the same way, and compare: if it is not better, put it back and say so. Then your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
 const NEXT_FALLBACK = "Make the one change that most improves the game for BRIEF.md.";
 
 const clip = (text: string, max: number) =>
