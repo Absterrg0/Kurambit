@@ -127,7 +127,11 @@ export const GameBlenderAssetsImportInput = Schema.Struct({
   id: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,80}$/))),
   /** library: the entry's file. */
   path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
-  assetType: Schema.optionalKey(Schema.String),
+  assetType: Schema.optionalKey(
+    Schema.Literals(["hdris", "textures", "models"]).annotate({
+      description: "polyhaven, required: what the id is.",
+    }),
+  ),
   targetSize: Schema.optionalKey(Schema.Number),
   resolution: Schema.optionalKey(Schema.String),
   applyTo: Schema.optionalKey(Schema.Array(Schema.String)),
