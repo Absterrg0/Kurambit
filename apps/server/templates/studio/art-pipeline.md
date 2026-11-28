@@ -10,8 +10,8 @@ ship.
 
 ## The look: STYLE.json
 
-`game_assets` op `lock` records `view`, `scale.character` (metres),
-`budget` and `shape.edges`. Models ship with your own materials and
+`game_assets` op `lock` records `view` and `shape.edges` (faceted, soft
+or voxel). Models ship with your own materials and
 textures. A `palette` with `finish: "flat"` puts every model on one atlas:
 only when the person chose it. How models are made is in game.json:
 `characters` `any` (you choose per model; Blender is recommended for

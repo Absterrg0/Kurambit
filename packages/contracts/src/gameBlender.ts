@@ -15,9 +15,9 @@ const BlenderName = Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{
     SchemaTransformation.toLowerCase(),
   ),
 );
-/** A look's view: a named side (front, back, left, right, top, three_quarter) or an [x, y, z] direction. */
+/** "side" is the right profile, as the model sheet and the review say it. */
 const BlenderLookView = Schema.Union([
-  Schema.String,
+  Schema.Literals(["front", "back", "left", "right", "top", "three_quarter", "side"]),
   Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
 ]);
 
@@ -33,7 +33,12 @@ export type GameBlenderCodeResult = typeof GameBlenderCodeResult.Type;
 export const GameBlenderLookInput = Schema.Struct({
   mode: Schema.optionalKey(Schema.Literals(["viewport", "camera", "angles", "frames", "review"])),
   target: Schema.optionalKey(Schema.Array(Schema.String)),
-  views: Schema.optionalKey(Schema.Array(BlenderLookView)),
+  views: Schema.optionalKey(
+    Schema.Array(BlenderLookView).annotate({
+      description:
+        "angles: up to 6, each a named side or an [x, y, z] direction from the target toward the eye ([0, -1, 0.2]: the front, a little above).",
+    }),
+  ),
   distance: Schema.optionalKey(Schema.Number),
   shading: Schema.optionalKey(
     Schema.Literals(["solid", "material", "rendered", "wireframe", "xray"]),
@@ -41,7 +46,12 @@ export const GameBlenderLookInput = Schema.Struct({
   frames: Schema.optionalKey(Schema.Array(Schema.Number)),
   frameCount: Schema.optionalKey(Schema.Number),
   view: Schema.optionalKey(Schema.String),
-  maxSize: Schema.optionalKey(Schema.Number),
+  maxSize: Schema.optionalKey(
+    Schema.Int.annotate({
+      description:
+        "The picture's longest side in px, 200 to 2000 (default 768). To see a part closer, give target and distance.",
+    }),
+  ),
   /** review: the character's height on screen at game distance, px. Default from STYLE.json view: perspective 96, side 96, top-down 64, isometric 64. */
   gamePx: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 16, maximum: 512 }))),
   reference: Schema.optionalKey(
@@ -138,12 +148,12 @@ export const GameBlenderExportInput = Schema.Struct({
    * scene. A name that matches nothing fails the call with the close names.
    */
   objects: Schema.optionalKey(Schema.Array(Schema.String)),
-  /**
-   * Game-relative destination, which must sit under the engine directory
-   * (`web/`) and end with `.glb`. Omitted means
-   * `<engine dir>/assets/blender/scene.glb`.
-   */
-  file: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
+  file: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)).annotate({
+      description:
+        "Game-relative .glb under the engine directory, e.g. web/assets/cart.glb. Omitted: <engine dir>/assets/blender/scene.glb.",
+    }),
+  ),
   /**
    * three.js: the most triangles the shipped model keeps. The export simplifies it toward that
    * count, keeping its outline and seams; the result says how many it kept. Omitted: all of them.
